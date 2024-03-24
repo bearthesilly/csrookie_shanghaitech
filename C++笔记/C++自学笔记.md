@@ -192,8 +192,6 @@ const int &ri = temp;
 
 C++中预先保留的单词(标识符)
 
-![image-20240122203305020](C:\Users\xiong\AppData\Roaming\Typora\typora-user-images\image-20240122203305020.png)
-
 在给变量或者常量起名称的时候, 不能够使用关键词, 否则会产生歧义
 
 ### 标识符命名规则:
@@ -242,8 +240,6 @@ C++规定在创建一个变量的时候, 必须之处它的数据类型, 否则�
 而数据类型的存在意义: 给变量分配合适的内存空间
 
 整型的类型也用很多: 区别在于所占内存的空间不同
-
-![image-20240122203924941](C:\Users\xiong\AppData\Roaming\Typora\typora-user-images\image-20240122203924941.png)
 
 记住指数的方式:15 * 2 + 1 = 31    31 * 2 + 1 = 32
 
@@ -316,8 +312,6 @@ The size of c is 8
 
 浮点型变量分为两种: 单精度 float    双精度  double
 
-![image-20240122205145591](C:\Users\xiong\AppData\Roaming\Typora\typora-user-images\image-20240122205145591.png)
-
 注意: 这里说的是有效数字! 3.14有效数字是3位!
 
 #### 字符型
@@ -380,25 +374,6 @@ bool类型只有两个值: true = 1     flase = 0
 语法: bool 变量名 = true/flase
 
 它们占用的类型只有一个字节
-
-#### 占位符
-
-![image-20240306084941033](C:\Users\23714\AppData\Roaming\Typora\typora-user-images\image-20240306084941033.png)
-
-#### 占用多少内存？
-
-![image-20240306083514567](C:\Users\23714\AppData\Roaming\Typora\typora-user-images\image-20240306083514567.png)
-
-![image-20240306083553998](C:\Users\23714\AppData\Roaming\Typora\typora-user-images\image-20240306083553998.png)
-
-根据上图，可见（unsigned）int, long和long double占用的内存和系统版本有关
-
-同时，char究竟是默认signed还是unsigned是**implementation-defined**!
-
-![image-20240306083615039](C:\Users\23714\AppData\Roaming\Typora\typora-user-images\image-20240306083615039.png)
-
-- It is also guaranteed that `sizeof(short)` ⩽ `sizeof(int)` ⩽ `sizeof(long)` ⩽ `sizeof(long long)`.
-  - `sizeof(T)` is the number of **bytes** that `T` holds.
 
 #### 如何选择类型
 
@@ -769,8 +744,6 @@ aaaaaa  Hello World\
 
 ### 算数运算符
 
-![image-20240311082511035](C:\Users\23714\AppData\Roaming\Typora\typora-user-images\image-20240311082511035.png)
-
 注意, 两个整数相除, 依然是整数, 只不过是将小数点去除掉
 
 当然, 两个小数也是可以相除的; 两个小数是不可以进行取模运算的
@@ -783,9 +756,7 @@ aaaaaa  Hello World\
 
 ### 逻辑运算符
 
-![image-20240311082620834](C:\Users\23714\AppData\Roaming\Typora\typora-user-images\image-20240311082620834.png)
-
-要记忆运算符所对应的术语!6
+要记忆运算符所对应的术语!
 
 特殊：逗号运算符，是运算优先级最低之一的一种运算符,  最后一个逗号后面的值作为整个表达式的值：
 
@@ -794,8 +765,6 @@ int a=3, b=5, c;
 c = a>b, a+b; // c = 0, 因为优先运算a>b是false(0)
 c = (a>b, a+b) // c = 8
 ````
-
-
 
 ## 程序流程结构
 
@@ -1411,8 +1380,6 @@ int arr[n] = {1,2,3,4,5};
 
 #### 一位数组案例
 
-![image-20240128161330343](C:\Users\xiong\AppData\Roaming\Typora\typora-user-images\image-20240128161330343.png)
-
 ````c++
 # include <iostream>
 using namespace std;
@@ -1435,8 +1402,6 @@ int main()
     return 0;
 }
 ````
-
-![image-20240128161817916](C:\Users\xiong\AppData\Roaming\Typora\typora-user-images\image-20240128161817916.png)
 
 ````c++
 # include <iostream>
@@ -5694,8 +5659,6 @@ s5.append(s1, 0, 2); // I am
 - 查找: 查找指定字符串是否存在
 - 替换: 在指定的位置替换字符串
 
-![image-20240212204834428](C:\Users\xiong\AppData\Roaming\Typora\typora-user-images\image-20240212204834428.png)
-
 ````c++
 # include <string>
 void test()
@@ -5741,8 +5704,6 @@ void test()
     cout << str << endl; // hallo
 }
 ````
-
-#### ![image-20240212210628951](C:\Users\xiong\AppData\Roaming\Typora\typora-user-images\image-20240212210628951.png)
 
 ````c++
 void test()
