@@ -63,3 +63,5 @@ torch.cuda.is_available()
 ![image](https://github.com/bearthesilly/csrookie/blob/main/dl_hw_project/png_hw1/3.png)
 
 虽然看似卡点不多，但是前前后后一周忙了将近有10个小时。从一开始的docker实例都不敢创建，到终于完成任务，debugging带来的历练是相当大的。Patience is everything（虽然周二下午总是“ssh拒绝了密码”把我搞红温了QAQ）
+
+由于是后来进行的总结，可能上述文档并没有完全记录我遇到的问题或者关键点。而且还有一点感悟：一个报错可能是不同的bug造成的了，这确实是十分annoying的。
