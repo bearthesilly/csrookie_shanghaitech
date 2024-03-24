@@ -128,7 +128,7 @@ points.is_contiguous() # True
 points_t.is_contiguous() # False
 ````
 
-<img src="C:\Users\23714\Desktop\SKD时期文件\4VDLab\dl自学截图\pytorch\1.png" alt="1" style="zoom:33%;" />
+![image](https://github.com/bearthesilly/csrookie/blob/main/pytorch/1.png)
 
 注意这一部分其实挺关键的, 假如说转化为int的话, 直接32位, 内存拉满; 能用int8就int8
 
@@ -233,7 +233,7 @@ array([[1., 1., 1., 1.],
 f.close()
 ````
 
-<img src="C:\Users\23714\Desktop\SKD时期文件\4VDLab\dl自学截图\pytorch\2.png" alt="2" style="zoom:33%;" />
+![image](https://github.com/bearthesilly/csrookie/blob/main/pytorch/2.png)
 
 ````python
 import torch
@@ -290,7 +290,7 @@ gray_plain.shape, gray_plain.names
 
 小练习:
 
-![3](C:\Users\23714\Desktop\SKD时期文件\4VDLab\dl自学截图\pytorch\3.png)
+![image](https://github.com/bearthesilly/csrookie/blob/main/pytorch/3.png)
 
 ````python
 import torch
@@ -308,7 +308,7 @@ c.size(), c.storage_offset(), c.stride(), c.is_contiguous
 # (torch.Size([2, 2]), 4, (3, 1), False)
 ````
 
-![4](C:\Users\23714\Desktop\SKD时期文件\4VDLab\dl自学截图\pytorch\4.png)
+![image](https://github.com/bearthesilly/csrookie/blob/main/pytorch/4.png)
 
 ````python
 import torch
@@ -358,9 +358,9 @@ plt.imshow(vol_arr[:,256,:])
 # 这张图片就是正面看过去的纵切面了！
 ````
 
-<img src="C:\Users\23714\Desktop\SKD时期文件\4VDLab\dl自学截图\pytorch\5.png" alt="5" style="zoom: 67%;" />
+![image](https://github.com/bearthesilly/csrookie/blob/main/pytorch/5.png)
 
-![6](C:\Users\23714\Desktop\SKD时期文件\4VDLab\dl自学截图\pytorch\6.png)
+![image](https://github.com/bearthesilly/csrookie/blob/main/pytorch/6.png)
 
 接下来学习表格形式的读取
 
