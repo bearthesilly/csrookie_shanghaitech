@@ -1,6 +1,6 @@
 # 如何使用slurm（自学）
 
-主要来源：B站BV1Uu411n7jT； 学校手册：http://10.15.89.177:8889/job/index.html
+学校手册：http://10.15.89.177:8889/job/index.html
 
 ## 调度系统是什么
 
@@ -66,6 +66,8 @@ c. 运行python文件（python脚本文件必须和批处理文件放在一个�
 
 # 实操
 
+## 失败经历
+
 首先进入了登陆节点，然后安装anaconda3（一开始不知道为什么没有自动配置到环境变量里面，但是之后``vi ~/.bashrc``）人工配置就好了
 
 ``export PATH="/home/your_username/anaconda3/bin:$PATH"``
@@ -107,3 +109,19 @@ print(torch.__version__)
 print(torch.version.cuda)
 print("this is a test")
 ````
+
+但是总是不成功，因此尝试salloc后进入计算节点，进行交互式作业
+
+## 成功！SALLOC办法
+
+``salloc -N 1 -n 4 -p normal --gres=gpu:4``， 代表着在normal队列里面申请四块GPU
+
+然后通过``squeue``来查看申请到的节点是什么，然后``ssh (node)``
+
+就可以成功登录计算节点了；登录上来之后，首先要``source ~/.bashrc``再次激活环境
+
+进入conda之后依然是老流程，最后成功激活环境：
+![image](/png/5.png)
+
+几个重要的点： 英伟达驱动是计算节点自带的，cuda是``/public/software``中的cuda11.3， 并且已经路径输入到了PATH和LIBRARY里面
+
