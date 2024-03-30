@@ -121,7 +121,7 @@ print("this is a test")
 就可以成功登录计算节点了；登录上来之后，首先要``source ~/.bashrc``再次激活环境
 
 进入conda之后依然是老流程，最后成功激活环境：
-![image](/png/5.png)
+![image](png/5.png)
 
 几个重要的点： 英伟达驱动是计算节点自带的，cuda是``/public/software``中的cuda11.3， 并且已经路径输入到了PATH和LIBRARY里面
 
