@@ -57,9 +57,19 @@ git config --global user.email "your@email.com"
 
 ``pyyaml wandb tqdm``然后发现报错： 
 
-``Importerror： cannot import Literal from typing multimethod``
+``Importerror： cannot import Literal from typing multimethod termcolor``
 
 原来发现环境的python版本太低，应该至少3.8，因此只能重新``conda install python=3.8``
 
 并且要重新下载``conda install setuptools=59.5.0``
+
+
+
+但是又报错： multimethod中的一个地方有： 
+
+````bash
+TypeError: ABCMeta is not subscriptable
+````
+
+经过大量尝试，才发现是python版本的问题，升级到3.9就解决了。。
 
