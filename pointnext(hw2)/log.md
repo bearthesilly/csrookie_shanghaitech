@@ -40,3 +40,26 @@ git config --global user.email "your@email.com"
 然后``ssh -T git@github.com``
 
 最后就能成功连接了（如果不行，**试一下重启**）
+
+（后记：后来发现，计算节点确实是任何下载或者网址都连接不上，因此可能是要退出计算节点的原因；对应的，如果conda环境下载什么东西，最好是在登陆节点下载）
+
+
+
+然后git clone之后按照流程，发现gcc版本很低；因此将software中的git配置到环境变量里面
+
+注意： 是/.../bin:$PATH, $PATH代表环境变量，这句话代表在最前面加上gcc路径
+
+因为系统是从PATH的左到右去找能够发现的gcc!
+
+
+
+本来以为能够开始实验了，但是却发现运行程序前还有一大堆的包需要安装
+
+``pyyaml wandb tqdm``然后发现报错： 
+
+``Importerror： cannot import Literal from typing multimethod``
+
+原来发现环境的python版本太低，应该至少3.8，因此只能重新``conda install python=3.8``
+
+并且要重新下载``conda install setuptools=59.5.0``
+
