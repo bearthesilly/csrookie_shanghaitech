@@ -55,13 +55,13 @@ git config --global user.email "your@email.com"
 
 本来以为能够开始实验了，但是却发现运行程序前还有一大堆的包需要安装
 
-``pyyaml wandb tqdm``然后发现报错： 
+``pyyaml wandb tqdm multimethod termcolor h5py scikit-learn easydict tensorboard``然后发现报错： 
 
-``Importerror： cannot import Literal from typing multimethod termcolor``
+``Importerror： cannot import Literal from typing `` 
 
 原来发现环境的python版本太低，应该至少3.8，因此只能重新``conda install python=3.8``
 
-并且要重新下载``conda install setuptools=59.5.0``
+并且要重新下载``conda install setuptools=y59.5.0``
 
 
 
@@ -73,3 +73,10 @@ TypeError: ABCMeta is not subscriptable
 
 经过大量尝试，才发现是python版本的问题，升级到3.9就解决了。。
 
+
+
+然后又报错： ``libstdc++.so.6: version `GLIBCXX_3.4.30'``
+
+直接将scipy的版本降到1.7.3   ``conda install scipy==1.7.3``
+
+python
