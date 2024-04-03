@@ -55,7 +55,7 @@ git config --global user.email "your@email.com"
 
 本来以为能够开始实验了，但是却发现运行程序前还有一大堆的包需要安装
 
-``pyyaml wandb tqdm multimethod termcolor h5py scikit-learn easydict tensorboard``然后发现报错： 
+``pyyaml wandb tqdm multimethod termcolor h5py scikit-learn easydict tensorboard shortuuid``然后发现报错： 
 
 ``Importerror： cannot import Literal from typing `` 
 
@@ -77,6 +77,6 @@ TypeError: ABCMeta is not subscriptable
 
 然后又报错： ``libstdc++.so.6: version `GLIBCXX_3.4.30'``
 
-直接将scipy的版本降到1.7.3   ``conda install scipy==1.7.3``
+直接将scipy的版本降到1.7.3   ``conda install scipy==1.7.3``; 但是还是发生问题！
 
-python
+归根结底，我们需要conda下载最新版的gcc, 然后将env里的bin和lib相对应地添加到PATH & LD_LIBRARY_PATH
