@@ -55,7 +55,7 @@ git config --global user.email "your@email.com"
 
 本来以为能够开始实验了，但是却发现运行程序前还有一大堆的包需要安装
 
-``pyyaml wandb tqdm multimethod termcolor h5py scikit-learn easydict tensorboard shortuuid chamferdist``然后发现报错： 
+``pyyaml wandb tqdm multimethod termcolor h5py scikit-learn easydict tensorboard shortuuid``然后发现报错： 
 
 ``Importerror： cannot import Literal from typing `` 
 
@@ -84,3 +84,13 @@ TypeError: ABCMeta is not subscriptable
 后来提示要先运行python setup.py install， 但是提示``cc1plus``错误，因为要相同的GCC G++版本
 
 又因为CUDA11.3 build的时候不能支持过高版本的GCC G++， 我还临时改路径；最终运行成功
+
+
+
+接下来提示安装``chamfer``的库，这个库的安装有点不一样，还需要``python setup.py install``
+
+最后手动下载modelnet的数据集（由于计算节点不能联网，所以什么都不做然后跑第一次，会报错无法连接上一个下载这个数据集的网站，因此我们手动连接上这个网站就可以了）最后就成功了
+
+![image](png/1.png)
+
+终于，终于，跑通了
