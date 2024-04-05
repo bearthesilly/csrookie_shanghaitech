@@ -94,3 +94,11 @@ TypeError: ABCMeta is not subscriptable
 ![image](png/1.png)
 
 终于，终于，跑通了
+
+![image](png/2.png)
+
+上面是训练完成的时候
+
+![image](png/3.png)
+
+上面是test的结果
