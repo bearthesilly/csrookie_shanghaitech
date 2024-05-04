@@ -839,7 +839,7 @@ params = torch.tensor([1.0, 0.0], requires_grad=True)
 # 在深度学习中，通常将这样的张量用作模型的参数，并且在训练过程中，会根据损失函数计算的梯度来更新这些参数，以使模型逐渐优化到最佳状态。
 params.grad is None # True, 代表尚未进行计算
 loss = loss_fn(model(t_u, *params), t_c)
-# 星号代表这个数组展开成两个变量
+# 星号代表这个数组展开成两个变量，然后赋值给w和b
 loss.backward() # 反向传播一次
 # PyTorch 的自动求导机制会自动跟踪张量上的操作，并构建计算图以便计算梯度
 params.grad # tensor([4517.2969,   82.6000])
@@ -894,6 +894,7 @@ tensor([  5.3671, -17.3012], requires_grad=True)
 ````python
 # 这一部分紧接着上文
 import torch.optim as optim
+dir(optim) # 查看所有的优化器
 params = torch.tensor([1.0, 0.0], requires_grad=True)
 learning_rate = 1e-5
 optimizer = optim.SGD([params], lr=learning_rate)
@@ -1000,6 +1001,459 @@ def training_loop(n_epochs, optimizer, params, train_t_u, val_t_u,
                   f" Validation loss {val_loss.item():.4f}")
             
     return params
+````
+
+## Chapter 6
+
+````python
+%matplotlib inline
+import numpy as np
+import torch
+import torch.optim as optim
+
+torch.set_printoptions(edgeitems=2, linewidth=75)
+t_c = [0.5,  14.0, 15.0, 28.0, 11.0,  8.0,  3.0, -4.0,  6.0, 13.0, 21.0]
+t_u = [35.7, 55.9, 58.2, 81.9, 56.3, 48.9, 33.9, 21.8, 48.4, 60.4, 68.4]
+t_c = torch.tensor(t_c).unsqueeze(1) # for batch input and output 
+t_u = torch.tensor(t_u).unsqueeze(1) # unsqueeze里面插入的参数是插入之后1的位置的引索
+# torch.Size([11,1])
+'''
+unsqueeze的主要用途包括：
+广播（Broadcasting）：在进行元素级操作（如加法或乘法）时，如果两个张量的形状不匹配，可以通过增加维度来实现广播。
+网络结构调整：在构建神经网络时，可能需要调整张量的形状以匹配网络层的输入要求。
+多维数据处理：在处理多维数据时，unsqueeze可以用来插入额外的维度，以便进行更复杂的操作。
+维度操作：在某些情况下，可能需要对张量的特定维度进行操作，而unsqueeze可以方便地插入一个维度以便于后续处理。
+适配损失函数或激活函数：某些损失函数或激活函数可能要求输入张量具有特定的维度，unsqueeze可以用来适配这些要求。
+'''
+n_samples = t_u.shape[0]
+n_val = int(0.2 * n_samples)
+shuffled_indices = torch.randperm(n_samples)
+train_indices = shuffled_indices[:-n_val]
+val_indices = shuffled_indices[-n_val:]
+# 获取 shuffled_indices 数组中从第一个元素开始到倒数第 n_val 个元素之前的所有元素。
+# 也就是说，它不包括倒数第 n_val 个元素及其之后的所有元素。
+t_u_train = t_u[train_indices]
+t_c_train = t_c[train_indices]
+
+t_u_val = t_u[val_indices]
+t_c_val = t_c[val_indices]
+
+t_un_train = 0.1 * t_u_train
+t_un_val = 0.1 * t_u_val
+
+import torch.nn as nn
+# 从最基本的线性开始
+linear_model = nn.Linear(1, 1) # input shape and output shape 
+linear_model(t_un_val)
+'''
+nn.Linear 模块期望其输入张量具有至少两个维度：一个批量维度（batch dimension）和一个特征维度.
+而输入对额两个参数一个是in_features,一个是out_features
+in_features：这是全连接层输入特征的数量。也就是说，这定义了输入数据的维度，或者说是每个数据样本的特征数量。
+out_features：这是全连接层输出特征的数量。这定义了输出数据的维度，或者说是经过该层处理后每个数据样本的特征数量。
+这两个参数确定了权重矩阵和偏置向量的大小：
+权重矩阵 W 的大小是 (out_features, in_features)。
+偏置向量 b 的大小是 out_features。
+'''
+
+linear_model.weight # 其实就是之前的parameter
+linear_model.bias # 其实就是之前的那个b
+x = torch.ones(1)
+linear_model(x) # 返回的结果就是w+b
+
+linear_model = nn.Linear(1, 1) # <1>
+optimizer = optim.SGD(
+    linear_model.parameters(), # <2>
+    lr=1e-2)
+list(linear_model.parameters()) # 小技巧，加了list才能看到
+'''
+[Parameter containing:
+ tensor([[0.7398]], requires_grad=True), Parameter containing:
+ tensor([0.7974], requires_grad=True)]
+'''
+
+def loss_fn(t_p, t_c):
+    squared_diffs = (t_p - t_c)**2
+    return squared_diffs.mean()
+def training_loop(n_epochs, optimizer, model, loss_fn, t_u_train, t_u_val,
+                  t_c_train, t_c_val):
+    for epoch in range(1, n_epochs + 1):
+        t_p_train = model(t_u_train) # <1>
+        loss_train = loss_fn(t_p_train, t_c_train)
+
+        t_p_val = model(t_u_val) # <1>
+        loss_val = loss_fn(t_p_val, t_c_val)
+        '''
+        在训练循环中，模型首先在训练集上进行前向传播和损失计算，然后执行反向传播和参数更新，以优化模		  型参数。接着，模型在验证集上进行前向传播，计算验证集上的损失，但不会在验证集上执行反向传播和         参数更新。
+        '''
+        # 在反向传播之前，需要将模型参数的梯度清零，因为默认情况下梯度是累加的。
+        optimizer.zero_grad()
+        # 执行反向传播算法，计算损失相对于模型参数的梯度。
+        loss_train.backward() # <2>
+        # optimizer.step(): 根据计算出的梯度更新模型的参数 
+        optimizer.step()
+
+        if epoch == 1 or epoch % 1000 == 0:
+            print(f"Epoch {epoch}, Training loss {loss_train.item():.4f},"
+                  f" Validation loss {loss_val.item():.4f}")
+linear_model = nn.Linear(1, 1) # <1>
+optimizer = optim.SGD(linear_model.parameters(), lr=1e-2)
+
+training_loop(
+    n_epochs = 3000, 
+    optimizer = optimizer, # 定义的SGD
+    model = linear_model, # 定义的nn.Linear
+    loss_fn = loss_fn, # 定义的loss函数
+    t_u_train = t_un_train,
+    t_u_val = t_un_val, 
+    t_c_train = t_c_train,
+    t_c_val = t_c_val)
+````
+
+````python 
+# 之前的model是一个非常简单的Linear model， 而实战中，有很多的层与结构
+seq_model = nn.Sequential(
+            nn.Linear(1, 13), # 升维至十三维
+            nn.Tanh(), # 这个激活函数在深度学习里面讲过
+            nn.Linear(13, 1)) # 最后降维至一个维度
+seq_model
+'''
+Sequential(
+  (0): Linear(in_features=1, out_features=13, bias=True)
+  (1): Tanh()
+  (2): Linear(in_features=13, out_features=1, bias=True)
+	)
+'''
+[param.shape for param in seq_model.parameters()]
+# [torch.Size([13, 1]), torch.Size([13]), torch.Size([1, 13]), torch.Size([1])]
+for name, param in seq_model.named_parameters():
+    print(name, param.shape)
+'''
+0.weight torch.Size([13, 1])
+0.bias torch.Size([13])
+2.weight torch.Size([1, 13])
+2.bias torch.Size([1])
+'''
+from collections import OrderedDict
+# 使用上面这个库，可以给每一层进行命名
+seq_model = nn.Sequential(OrderedDict([
+    ('hidden_linear', nn.Linear(1, 8)),
+    ('hidden_activation', nn.Tanh()),
+    ('output_linear', nn.Linear(8, 1))
+]))
+
+seq_model
+'''
+Sequential(
+  (hidden_linear): Linear(in_features=1, out_features=8, bias=True)
+  (hidden_activation): Tanh()
+  (output_linear): Linear(in_features=8, out_features=1, bias=True)
+	)
+'''
+optimizer = optim.SGD(seq_model.parameters(), lr=1e-3)
+training_loop(
+    n_epochs = 5000, 
+    optimizer = optimizer,
+    model = seq_model,
+    loss_fn = nn.MSELoss(),
+    t_u_train = t_un_train,
+    t_u_val = t_un_val, 
+    t_c_train = t_c_train,
+    t_c_val = t_c_val)
+````
+
+````python
+class SubclassModel(nn.Module): # 虽然这个模型很简单，但它展示了如何开始构建自定义模型 
+    # torch.nn.Module 是PyTorch中用于构建神经网络模型的基础类
+    def __init__(self):
+        super().__init__()  # <1>
+        
+        self.hidden_linear = nn.Linear(1, 13)
+        self.hidden_activation = nn.Tanh()
+        self.output_linear = nn.Linear(13, 1)
+        
+    def forward(self, input):
+        hidden_t = self.hidden_linear(input)
+        activated_t = self.hidden_activation(hidden_t)
+        output_t = self.output_linear(activated_t)
+        
+        return output_t
+    
+subclass_model = SubclassModel()
+subclass_model
+'''
+SubclassModel(
+  (hidden_linear): Linear(in_features=1, out_features=13, bias=True)
+  (hidden_activation): Tanh()
+  (output_linear): Linear(in_features=13, out_features=1, bias=True)
+)
+'''
+````
+
+## Chapter7 
+
+目标： Building a feed-forward neural network  （未涉及到卷积）
+
+Loading data using Datasets and DataLoaders
+
+Understanding classification loss 
+
+````python
+%matplotlib inline
+from matplotlib import pyplot as plt
+import numpy as np
+import torch
+
+torch.set_printoptions(edgeitems=2, linewidth=75)
+torch.manual_seed(123)
+from torchvision import datasets
+data_path = '../data-unversioned/p1ch7/'
+cifar10 = datasets.CIFAR10(data_path, train=True, download=True) # <1>
+'''
+这个对象提供了一些方法来访问数据：
+__len__: 返回数据集中样本的数量。
+__getitem__: 根据索引获取单个样本的图像和标签。使用这个方法直接用cifar10[x]就可以了
+类加载 CIFAR-10 数据集时，cifar10 对象实际上是一个 Dataset 类的实例
+'''
+cifar10_val = datasets.CIFAR10(data_path, train=False, download=True) # <2>
+class_names = ['airplane','automobile','bird','cat','deer',
+               'dog','frog','horse','ship','truck']
+fig = plt.figure(figsize=(8,3))
+num_classes = 10
+for i in range(num_classes):
+    ax = fig.add_subplot(2, 5, 1 + i, xticks=[], yticks=[])
+    ax.set_title(class_names[i])
+    img = next(img for img, label in cifar10 if label == i) # cifar10_val
+    plt.imshow(img)
+plt.show()
+len(cifar10),len(cifar10_val) # 50000 10000
+img, label = cifar10[99]
+img, label, class_names[label]
+
+from torchvision import transforms
+to_tensor = transforms.ToTensor()
+# 只是创造了一个能够实现类型转换的实例
+img_t = to_tensor(img)
+img_t.shape # torch.Size([3, 32, 32])， 3各通道，图片是32*32的
+tensor_cifar10 = datasets.CIFAR10(data_path, train=True, download=False,
+                          transform=transforms.ToTensor())
+# transform=transforms.ToTensor()这句话就实现了转换，但是转化过来后还不是真正的tensor
+img_t, _ = tensor_cifar10[99] # 其实是（tensor, label）这个tuple
+img_t.shape, img_t.dtype # (torch.Size([3, 32, 32]), torch.float32)
+plt.imshow(img_t.permute(1, 2, 0)) 
+# .permute其实就是重新排序三个维度的顺序，数字代表的就是原来的引索，而顺序代表的就是新顺序
+
+# 接下来要实现归一化，normalization,那么就想要把所有50000张图片归纳到一起
+imgs = torch.stack([img_t for img_t, _ in tensor_cifar10], dim=3)
+imgs.shape # torch.Size([3, 32, 32, 50000])， dim 参数的含义取决于张量的形状和你想堆叠它们的维度
+imgs.view(3, -1).mean(dim=1) 
+#  imgs.view(3, -1) 将 imgs 重塑为一个形状为 [3, 32*32*50000] 的张量
+# .mean(dim=1)：接着，计算新张量在 dim=1 维度上的平均值。
+imgs.view(3, -1).std(dim=1)
+transforms.Normalize(imgs.view(3, -1).mean(dim=1),imgs.view(3, -1).std(dim=1))
+# Normalize(mean=(0.4915, 0.4823, 0.4468), std=(0.247, 0.2435, 0.2616)) 下面会用
+transformed_cifar10 = datasets.CIFAR10(
+    data_path, train=True, download=False,
+    transform=transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4915, 0.4823, 0.4468),
+                             (0.2470, 0.2435, 0.2616))
+    ]))
+transformed_cifar10_val = datasets.CIFAR10(
+    data_path, train=False, download=False, # 注意是train = false
+    transform=transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4915, 0.4823, 0.4468),
+                             (0.2470, 0.2435, 0.2616))
+    ]))
+````
+
+实现分类任务：
+
+````python
+%matplotlib inline
+from matplotlib import pyplot as plt
+import numpy as np
+import torch
+
+torch.set_printoptions(edgeitems=2)
+torch.manual_seed(123)
+
+class_names = ['airplane','automobile','bird','cat','deer',
+               'dog','frog','horse','ship','truck']
+
+from torchvision import datasets, transforms
+data_path = '../data-unversioned/p1ch7/'
+cifar10 = datasets.CIFAR10(
+    data_path, train =True, download=False,
+    transform=transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4915, 0.4823, 0.4468),
+                             (0.2470, 0.2435, 0.2616))
+        
+cifar10_val = datasets.CIFAR10(
+    data_path, train=False, download=False,
+    transform=transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4915, 0.4823, 0.4468),
+                             (0.2470, 0.2435, 0.2616))
+        ]))
+label_map = {0: 0, 2: 1}
+class_names = ['airplane', 'bird']
+cifar2 = [(img, label_map[label])
+          for img, label in cifar10 
+          if label in [0, 2]] # 提取出鸟和飞机的相关数据集
+cifar2_val = [(img, label_map[label])
+              for img, label in cifar10_val
+              if label in [0,2]]
+````
+
+````python
+import torch.nn as nn
+
+n_out = 2
+
+model = nn.Sequential(
+            nn.Linear(
+                3072,  # <1>
+                512,   # <2>
+            ),
+            nn.Tanh(),
+            nn.Linear(
+                512,   # <2>
+                n_out, # <3>
+            )
+        )
+
+def softmax(x): # 激活层，当然torch里面也有
+    return torch.exp(x) / torch.exp(x).sum()
+x = torch.tensor([1.0, 2.0, 3.0])
+softmax(x) # 一个例子
+softmax = nn.Softmax(dim=1)
+model = nn.Sequential(
+            nn.Linear(3072, 512),
+            nn.Tanh(),
+            nn.Linear(512, 2),
+            nn.Softmax(dim=1))
+img_batch = img.view(-1).unsqueeze(0) # torch.Size([1,3072])
+# unsqueeze是为了dim=1
+out = model(img_batch) 
+# tensor([[0.4784, 0.5216]], grad_fn=<SoftmaxBackward0>)
+_, index = torch.max(out, dim=1)
+
+out = torch.tensor([
+    [0.6, 0.4],
+    [0.9, 0.1],
+    [0.3, 0.7],
+    [0.2, 0.8],
+])
+class_index = torch.tensor([0, 0, 1, 1]).unsqueeze(1)
+
+truth = torch.zeros((4,2))
+truth.scatter_(dim=1, index=class_index, value=1.0)
+truth
+'''
+tensor([[1., 0.],
+        [1., 0.],
+        [0., 1.],
+        [0., 1.]])
+'''
+
+def mse(out):
+    return ((out - truth) ** 2).sum(dim=1).mean()
+mse(out)
+
+out.gather(dim=1, index=class_index)
+'''
+tensor([[0.6000],
+        [0.9000],
+        [0.7000],
+        [0.8000]])
+'''
+def likelihood(out):
+    prod = 1.0
+    for x in out.gather(dim=1, index=class_index):
+        prod *= x
+    return prod
+def neg_log_likelihood(out):
+    return -likelihood(out).log()
+
+softmax = nn.Softmax(dim=1)
+log_softmax = nn.LogSoftmax(dim=1) # 再取对数
+
+train_loader = torch.utils.data.DataLoader(cifar2, batch_size=64,
+                                           shuffle=True)
+# 使用dataloader速度更快
+model = nn.Sequential(
+            nn.Linear(3072, 128),
+            nn.Tanh(),
+            nn.Linear(128, 2),
+            nn.LogSoftmax(dim=1))
+learning_rate = 1e-2
+
+optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+
+loss_fn = nn.NLLLoss()
+# 如果使用的是LogSoftmax，那么loss函数使用的就是NLLLoss()
+# 等效于Sequential里面不写LogSoftmax,而：
+# loss_fn = nn.CrossEntropyLoss()
+n_epochs = 100
+for epoch in range(n_epochs):
+    for img, label in cifar2:
+        out = model(img.view(-1).unsqueeze(0))
+        loss = loss_fn(out, torch.tensor([label]))
+                
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+	print("Epoch: %d, Loss: %f" % (epoch, float(loss)))
+model = nn.Sequential(
+            nn.Linear(3072, 1024),
+            nn.Tanh(),
+            nn.Linear(1024, 512),
+            nn.Tanh(),
+            nn.Linear(512, 128),
+            nn.Tanh(),
+            nn.Linear(128, 2))
+
+loss_fn = nn.CrossEntropyLoss()    
+````
+
+````python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+train_loader = torch.utils.data.DataLoader(cifar2, batch_size=64,
+                                           shuffle=True)
+
+model = nn.Sequential(
+            nn.Linear(3072, 1024),
+            nn.Tanh(),
+            nn.Linear(1024, 512),
+            nn.Tanh(),
+            nn.Linear(512, 128),
+            nn.Tanh(),
+            nn.Linear(128, 2))
+
+learning_rate = 1e-2
+
+optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+
+loss_fn = nn.CrossEntropyLoss() # 如上面介绍的那样
+
+n_epochs = 100
+
+for epoch in range(n_epochs):
+    for imgs, labels in train_loader:
+        outputs = model(imgs.view(imgs.shape[0], -1))
+        loss = loss_fn(outputs, labels)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    print("Epoch: %d, Loss: %f" % (epoch, float(loss)))
 ````
 
 
