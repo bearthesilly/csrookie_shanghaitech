@@ -45,23 +45,28 @@ class Encoder(nn.Module):   ## Embedding module
         '''
             point_groups : B G N 3
             其中B是批次大小,G是每个批次中的组数,N是每个组中的点数,3是因为每个点的坐标是三维的
+            为什么有"组"?下面的class Group就是在分组!
             -----------------
             feature_global : B G C
         '''
-        bs, g, n , _ = point_groups.shape
-        point_groups = point_groups.reshape(bs * g, n, 3) # 将所有的点云组展平为一个长序列
+        bs, g, n , _ = point_groups.shape # batch_size, 一个batch里面点组数,一组里面点的数量,一个点的三维信息
+        point_groups = point_groups.reshape(bs * g, n, 3) 
         # encoder
         feature = self.first_conv(point_groups.transpose(2,1))  # BG 256 n
-        # 将维度从(bs * g, n, 3)转换为(bs * g, 3, n)，这是因为nn.Conv1d期望第一个维度是通道数
+        # 将维度从(bs * g, n, 3)转换为(bs * g, 3, n)，这是因为nn.Conv1d期望第一个维度是通道数;匹配输入格式
+        # nn.Conv1d 期望输入张量遵循一定的格式，这个格式通常表示为 (batch_size, channels, length)
         feature_global = torch.max(feature,dim=2,keepdim=True)[0]  # BG 256 maxpooling
-        # [0]引索能够去掉最后一个维度
+        # torch.max返回的是元组,只取第一个(要值而不是引索);torch.Size([batch_size, channels, 1])
+        # "1"的存在是因为keepdim = True
         feature = torch.cat([feature_global.expand(-1,-1,n), feature], dim=1)# BG 512 n
+        # feature_global.expand(-1, -1, n) 将 feature_global 张量沿 length 维度扩展 n 次，而不改变其他维度。-1 表示该维度保持原有大小。
+        # dim = 1代表沿着拼接的维度
         feature = self.second_conv(feature) # BG 1024 n
         feature_global = torch.max(feature, dim=2, keepdim=False)[0] # BG 1024
         return feature_global.reshape(bs, g, self.encoder_channel)
 
 
-class Group(nn.Module):  # FPS + KNN
+class Group(nn.Module):  # FPS + KNN 如何进行分组
     def __init__(self, num_group, group_size):
         super().__init__()
         self.num_group = num_group # 存储要采样的中心点的数量，即组数
@@ -79,8 +84,10 @@ class Group(nn.Module):  # FPS + KNN
         batch_size, num_points, _ = xyz.shape
         # fps the centers out
         center = misc.fps(xyz, self.num_group) # B G 3  G是self.num_group
+        # center就是选中的num_group个中心点 
         # knn to get the neighborhood
         _, idx = self.knn(xyz, center) # B G M 只关心索引，不关心实际的距离
+        # idx是   tensor.Size([batch_size, num_group, group_size])
         assert idx.size(1) == self.num_group
         assert idx.size(2) == self.group_size
         idx_base = torch.arange(0, batch_size, device=xyz.device).view(-1, 1, 1) * num_points
@@ -88,12 +95,12 @@ class Group(nn.Module):  # FPS + KNN
         KNN搜索返回的索引是相对于每个中心点的局部索引.
         torch.arange(0, batch_size, device=xyz.device):创建一个从0到batch_size(不包括batch_size)的整数序列。
         batch_size是输入点云数据的批次大小。device=xyz.device确保这个序列在与点云数据相同的设备上
-        view(-1, 1, 1)：将上述创建的一维整数序列重塑为一个三维张量，其形状为(1, 1, batch_size)。
+        view(-1, 1, 1)：将上述创建的一维整数序列重塑为一个三维张量，其形状为(batch_size, 1, 1)。
         这里的-1是让PyTorch自动计算该维度的大小,以便保持元素总数不变。
-        * num_points:将每个元素在最后一个维度上乘以num_points(点云中的点数)。
-        这样,idx_base变成了形状为(1, 1, batch_size * num_points)的张量,其中每个元素都是从0开始的,按照num_points间隔的值
+        * num_points:将每个元素在最后一个维度上乘以num_points(每一批次点的数量)
         最终,idx_base是一个张量,其作用是为每个批次中的每个点提供一个全局的偏移量索引。
         这个偏移量索引随后用于将局部邻域索引(idx)转换为原始点云中的全局索引。
+        原来idx里面全都是相对于一个batch下的引索,从0到num_points-1;xyz里面引索是全局的
         '''
         idx = idx + idx_base # 得到点云中的全局索引
         idx = idx.view(-1) #  将 idx 张量重塑为一个一维张量 
@@ -116,9 +123,11 @@ class Group(nn.Module):  # FPS + KNN
 ## Transformers
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
+        # GELU（Gaussian Error Linear Unit）
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
+        # 如果是None,就用后面的值
         self.fc1 = nn.Linear(in_features, hidden_features)
         self.act = act_layer() # 激活层的类型，默认为nn.GELU（高斯误差线性单元）
         self.fc2 = nn.Linear(hidden_features, out_features)
@@ -401,7 +410,7 @@ class MaskTransformer(nn.Module):
             overall_mask[i, :] = mask
         overall_mask = torch.from_numpy(overall_mask).to(torch.bool)
 
-        return overall_mask.to(center.device) # B G
+        return overall_mask.to(center.device) # B G  这是一个布尔类型的张量
 
     def forward(self, neighborhood, center, noaug = False):
         # generate mask
@@ -415,6 +424,7 @@ class MaskTransformer(nn.Module):
         batch_size, seq_len, C = group_input_tokens.size()
 
         x_vis = group_input_tokens[~bool_masked_pos].reshape(batch_size, -1, C)
+        # 从 group_input_tokens 中选取那些未被掩码的点，即保留 bool_masked_pos 为 False 的位置对应的点。
         # add pos embedding
         # mask pos center
         masked_center = center[~bool_masked_pos].reshape(batch_size, -1, 3)
