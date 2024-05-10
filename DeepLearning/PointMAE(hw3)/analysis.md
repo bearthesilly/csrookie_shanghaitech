@@ -201,7 +201,79 @@ def build_loss_func(self, loss_type):
 
 # 详细读Point_MAE.py
 
-## class Encode
+## class Group
+
+这一部分旨在给点分组, 先FPS选中心点, 然后每一个中心点根据KNN去选相近的点.
+
+````python 
+class Group(nn.Module):  # FPS + KNN 如何进行分组
+    def __init__(self, num_group, group_size):
+        super().__init__()
+        self.num_group = num_group # 存储要采样的中心点的数量，即组数
+        self.group_size = group_size # 每个组内的点数
+        self.knn = KNN(k=self.group_size, transpose_mode=True) # 创建一个KNN类的实例，用于执行k最近邻搜索
+````
+
+初始化中, 规定了要分多少组, 每一个组里面多少个点(这里是32组, 每组64个点), 并且初始化了一个KNN实例, 用于选点
+
+````python
+    def forward(self, xyz):
+        '''
+            input: B N 3
+            输入xyz的维度是B N 3,其中B是批次大小,N是点云中的点数,3表示每个点的三维坐标
+            ---------------------------
+            output: B G M 3
+            center : B G 3
+        '''
+        batch_size, num_points, _ = xyz.shape
+        # fps the centers out
+        center = misc.fps(xyz, self.num_group) # B G 3  G是self.num_group
+        # center就是选中的num_group个中心点 
+        # knn to get the neighborhood
+        _, idx = self.knn(xyz, center) # B G M 只关心索引，不关心实际的距离
+        # idx是   tensor.Size([batch_size, num_group, group_size])
+        assert idx.size(1) == self.num_group
+        assert idx.size(2) == self.group_size
+        idx_base = torch.arange(0, batch_size, device=xyz.device).view(-1, 1, 1) * num_points
+        '''
+        KNN搜索返回的索引是相对于每个中心点的局部索引.
+        torch.arange(0, batch_size, device=xyz.device):创建一个从0到batch_size(不包括batch_size)的整数序列。
+        batch_size是输入点云数据的批次大小。device=xyz.device确保这个序列在与点云数据相同的设备上
+        view(-1, 1, 1)：将上述创建的一维整数序列重塑为一个三维张量，其形状为(batch_size, 1, 1)。
+        这里的-1是让PyTorch自动计算该维度的大小,以便保持元素总数不变。
+        * num_points:将每个元素在最后一个维度上乘以num_points(每一批次点的数量)
+        最终,idx_base是一个张量,其作用是为每个批次中的每个点提供一个全局的偏移量索引。
+        这个偏移量索引随后用于将局部邻域索引(idx)转换为原始点云中的全局索引。
+        原来idx里面全都是相对于一个batch下的引索,从0到num_points-1;xyz里面引索是全局的
+        '''
+        idx = idx + idx_base # 得到点云中的全局索引
+        idx = idx.view(-1) #  将 idx 张量重塑为一个一维张量 
+        '''
+        为什么需要将索引展平为一维？在处理点云数据时，我们通常需要根据这些索引从原始点云中提取特定的点。
+        通过将索引展平为一维，我们可以更方便地使用这些索引来索引原始点云张量
+        '''
+        neighborhood = xyz.view(batch_size * num_points, -1)[idx, :]
+        '''
+        .view()改变张量的形状而不改变其数据类型
+        [idx, :]::表示选取每个索引行中的所有列（即每个点的所有三维坐标）
+        neighborhood张量包含了根据idx索引从xyz中提取的邻域点。其形状是(B * G * M, 3)，其中每个点的三维坐标是连续排列的。
+        '''
+        neighborhood = neighborhood.view(batch_size, self.num_group, self.group_size, 3).contiguous()
+        # normalize
+        neighborhood = neighborhood - center.unsqueeze(2) # 将邻域点相对于中心点进行归一化，即从每个邻域点中减去对应的中心点坐标
+        return neighborhood, center
+
+````
+
+首先``center = misc.fps(xyz, self.num_group) # B G 3``很轻松地获取了中心点的信息, 然后配上KNN, 获得了一个idx tensor, 它的尺寸是tensor.Size([batch_size, num_group, group_size]), 值得注意的是, 这里面包含的数据全是引索. 
+
+但是有一个问题: KNN搜索返回的索引是相对于每个中心点的局部索引. 但是直觉上, 我想要绝对引索, 那么就需要把点的局部引索转化为绝对引索. 这个局部引索是相对于谁是局部引索? 是相对于batch! 那么就直接给每个数据加上所在batch * N就可以构建全局引索了! ``idx_base = torch.arange(0, batch_size, device=xyz.device).view(-1, 1, 1) * num_points``就是在创造"加上的数字", 最后idx加它就是全局引索了.
+
+然后idx里面的所有引索展为1维, 来去从xyz中提取点放进neighborhood, 它reshape后再连续储存一下(因为原来是取出的切片).最后, 相对于中心点归一化, 即从每个邻域点中减去对应的中心点坐标, 分组就分完了, 注意返回的尺度: ``output: B G M 3``
+
+## class Encoder 
+
+分好组了之后, 就可以对每一个点嵌入进潜空间了. 
 
 ````python 
 class Encoder(nn.Module):   ## Embedding module
@@ -226,17 +298,394 @@ class Encoder(nn.Module):   ## Embedding module
         '''
 ````
 
-在初始化中 
+在初始化中 ,encoder_channel是嵌入的潜空间的维度, 其实最后对应的是yaml文件中的encoder_dim; 然后定义了两个卷积层, 讲述了一个三维的数据是如何嵌入到384维的潜空间的. 具体的实现见下面的forward方法:
 
+````python 
+def forward(self, point_groups):
+        # 前向传播函数，处理输入的点云数据并生成特征表示
+        '''
+            point_groups : B G N 3
+            其中B是批次大小,G是每个批次中的组数,N是每个组中的点数,3是因为每个点的坐标是三维的
+            为什么有"组"?下面的class Group就是在分组!
+            -----------------
+            feature_global : B G C
+        '''
+        bs, g, n , _ = point_groups.shape # batch_size, 一个batch里面点组数,一组里面点的数量,一个点的三维信息
+        point_groups = point_groups.reshape(bs * g, n, 3) 
+        # encoder
+        feature = self.first_conv(point_groups.transpose(2,1))  # BG 256 n
+        # 将维度从(bs * g, n, 3)转换为(bs * g, 3, n)，这是因为nn.Conv1d期望第一个维度是通道数;匹配输入格式
+        # nn.Conv1d 期望输入张量遵循一定的格式，这个格式通常表示为 (batch_size, channels, length)
+        feature_global = torch.max(feature,dim=2,keepdim=True)[0]  # BG 256 maxpooling
+        # torch.max返回的是元组,只取第一个(要值而不是引索);torch.Size([batch_size, channels, 1])
+        # "1"的存在是因为keepdim = True
+        feature = torch.cat([feature_global.expand(-1,-1,n), feature], dim=1)# BG 512 n
+        # feature_global.expand(-1, -1, n) 将 feature_global 张量沿 length 维度扩展 n 次，而不改变其他维度。-1 表示该维度保持原有大小。
+        # dim = 1代表沿着拼接的维度
+        feature = self.second_conv(feature) # BG encoder_channel n
+        feature_global = torch.max(feature, dim=2, keepdim=False)[0]
+        return feature_global.reshape(bs, g, self.encoder_channel)
+````
 
+首先要明确输入进来的数据"尺寸": 张量里面第一个一定是batch_size, 一个batch里面有很多group, 一个group里面很多点,最后一个点有三个数据(三维坐标)(***因为是已经分完组了***). 因此尺寸如注释所说是: B G N 3. 输入之后要为了能够放入nn.Conv1d, 需要进行尺寸上的改变. 输入的一定是以一堆点的形式输入的, 因此B G 要合并, 而且通道数3应该放在第二位(transpose). 然后就进入了第一层卷积,然后进行max pooling. 注意, torch.max()返回的是元组, 第一个元组元素张量包含的是各自选中的值, 而第二个元组元素张量包含的是各自选中的在原张量里面的引索. 
 
+``注意keepdim=True``的使用, 因为选出来后, 一个特征只带上了一个最大值, 如果不加上这句话, 这个维度的"1"就会被省略掉, 尺寸就对不上了(torch.Size([batch_size, channels, 1])). 然后就是concatenation, 注意对应维度的延长. 这一池化然后和原特征拼接的思想, 应该是来源于PointNet. 
 
+这里的池化应该是n个256维的特征里面, 每一个维度都会在n个特征里面找最大, 最后得到一个256维的max pooling feature. 这也就是为什么这个feature要repeat n遍然后去拼接了
 
+最后经过第二层卷积层, 然后最大池化(这里``keepdim = False``), 得到了一个384维的特征, 有这个特征就认为是embedding完成了.reshape()回原来的结构, 只不过是维度不再是3, 这个Encoder就完成了.
 
+## Transformer组件
 
+### 组件一: class Mlp(Multi-Layer Processing)
 
+````python
+class Mlp(nn.Module):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
+        # GELU（Gaussian Error Linear Unit）
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        # 如果是None,就用后面的值
+        self.fc1 = nn.Linear(in_features, hidden_features)
+        self.act = act_layer() # 激活层的类型，默认为nn.GELU（高斯误差线性单元）
+        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.drop = nn.Dropout(drop) # 防止过拟合
 
+    def forward(self, x):
+        '''
+        在forward方法中,输入x首先通过第一个全连接层fc1,然后通过激活函数act,接着通过Dropout层drop进行正则化。
+        这一过程重复一次,首先通过第二个全连接层fc2,再次应用激活函数和Dropout。最终,处理后的张量x被返回
+        多层感知机是Transformer模型中的一个重要组成部分,它在自注意力机制之后应用,用于进一步处理和提取特征
+        '''
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
+````
 
+它的构建很容易看懂, 多层感知机是Transformer模型的一个重要组成部分,它在自注意力机制之后应用,用于进一步处理和提取特征.
 
+### 组件二: class Attention(自注意力)
 
+````python
+class Attention(nn.Module):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = qk_scale or head_dim ** -0.5
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+'''
+    self.num_heads:设置注意力机制的头数。
+    head_dim:计算每个头的特征维度,这是通过将输入维度dim除以头数num_heads得到的。
+    self.scale:设置注意力分数的缩放因子,通常使用head_dim的负0.5次方，这是为了在计算注意力分数时进行缩放，以保持梯度的稳定性。
+    self.qkv:定义一个线性层,用于生成查询(Query, Q)、键(Key, K)和值(Value, V)的表示。它将输入特征维度扩展为dim * 3,因为每个输入需要生成Q、K、V三个输出。
+    self.attn_drop:定义一个Dropout层,用于在注意力分数上应用Dropout,以进行正则化。
+    self.proj:定义一个线性层，用于在注意力机制的输出上进行变换。
+    self.proj_drop:定义另一个Dropout层,用于在变换后的输出上应用Dropout。
+    '''
+````
+
+注意这里还分了多头, 其实就是分组了一下, 各组去操作, 之后reshape合并. 注意到这里设置了两个dropout层(if needed)以防止过拟合, 也设置了scale. 这里的scale是为了公式: 
+
+![image](img/3.png)
+
+注意到第一个全连接层输出的维度是3*dim, 这是为了分出qkv. 自注意力机制中q k v是同源的, 但是仍然是要通过一个权重矩阵乘法得到的. 这里没有设置偏置项的学习
+
+````python 
+    def forward(self, x):
+        B, N, C = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        # reshape和permute操作将Q、K、V的表示重排并分割成多个头，以实现多头注意力机制。
+        '''
+        permutate的含义:
+        2:原来表示Q、K、V的维度,现在放在第一位,这样每个头的Q、K、V可以连续存储。
+        0:原来的批次大小维度，现在放在第二位。
+        3:头数维度，现在放在第三位。
+        1:原来的序列长度维度，现在放在第四位。
+        4:每个头的特征维度，现在放在最后一位。
+        '''
+        q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
+
+        attn = (q @ k.transpose(-2, -1)) * self.scale # @是阿达玛积
+        # 计算查询和键的点积，然后乘以缩放因子。
+        attn = attn.softmax(dim=-1) # 对注意力分数进行softmax归一化，得到注意力权重
+        attn = self.attn_drop(attn)
+
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C) # 使用注意力权重和值（V）计算加权和 
+        x = self.proj(x) # 使用注意力权重和值（V）计算加权和
+        x = self.proj_drop(x) # 在变换后的输出上应用Dropout
+        return x
+````
+
+这里前几步都是为了提取出q k v的相关信息, 然后后面就是按照自注意力机制的流程操作. 注意即使是阿达玛积, 矩阵也需要转置. 然后得到的矩阵乘以权重之后softmax得到权重矩阵, 和v相乘之后transpose + reshape再nn.Linear + dropout
+
+在多头注意力机制中，`attn`和`v`的形状通常是这样的：
+
+- `attn` 的形状：`[B, num_heads, N, N]`，其中：
+  - `B` 是批次大小（batch size）。
+  - `num_heads` 是注意力头的数量。
+  - `N` 是序列长度（sequence length），即每个头中的元素数量。
+  - 注意力权重是通过 `q` 和 `k` 的点积并且应用了softmax得到的。
+- `v` 的形状：`[B, num_heads, N, C // num_heads]`，其中 `C` 是输入特征的维度，并且被平均分配到每个头上。
+
+当我们执行 `attn @ v` 时，矩阵乘法沿着最后一个维度进行，即：
+
+- `attn` 的最后一个维度 `N` 与 `v` 的倒数第二个维度 `N` 对齐并相乘。
+- `attn` 的倒数第二个维度 `num_heads` 保持不变，因为这是加权和操作的一个扩展维度。
+
+因此，`attn @ v` 操作得到的张量形状将是 `[B, num_heads, N, C // num_heads]`。解释了为什么要transpose.
+
+### 拼接组件1&2: class Block
+
+````python
+class Block(nn.Module):
+    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+
+        # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
+        # 然后输出通过第二层归一化self.norm2,进入MLPself.mlp,再通过DropPath正则化。
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+
+        self.attn = Attention(
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+        
+    def forward(self, x):
+        x = x + self.drop_path(self.attn(self.norm1(x)))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+````
+
+drop_path是随机丢弃路径, 是一种用于训练深度网络的正则化技术，特别是在具有大量参数的网络中。DropPath 是一种路径丢弃（path dropout）的形式，它在训练期间随机丢弃网络中的整条路径，而不是单个的神经元或连接。
+
+显而易见, 一个模块里面是先自注意力, 然后再跟上多层感应. 
+
+### 使用Block: class TransformerEncoder(编码器)
+
+````python 
+class TransformerEncoder(nn.Module):
+    def __init__(self, embed_dim=768, depth=4, num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None,
+                 drop_rate=0., attn_drop_rate=0., drop_path_rate=0.):
+        super().__init__()
+        
+        self.blocks = nn.ModuleList([
+            Block(
+                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                drop=drop_rate, attn_drop=attn_drop_rate, 
+                drop_path = drop_path_rate[i] if isinstance(drop_path_rate, list) else drop_path_rate
+                )
+            for i in range(depth)])
+    '''
+    embed_dim:输入特征的维度。
+    depth:Transformer编码器块的数量。
+    num_heads:每个自注意力机制中的头数。
+    mlp_ratio:多层感知机(MLP)隐藏层维度与输入维度的比例。
+    qkv_bias:是否在线性层中添加偏置。
+    qk_scale:注意力机制中的缩放因子。
+    drop_rate:MLP中Dropout的比率。
+    attn_drop_rate:自注意力机制中Dropout的比率。
+    drop_path_rate:DropPath正则化的比率,可以是一个列表或单个值
+    '''
+    def forward(self, x, pos):
+        for _, block in enumerate(self.blocks):
+            x = block(x + pos)
+        return x
+    '''
+    使用一个for循环遍历self.blocks中的每个Block实例。
+    在每次迭代中,将当前块应用于输入x,同时将x与位置编码pos相加,以将位置信息融入模型的输入中。这种位置编码通常是必要的,
+    因为Transformer模型本身不具备捕捉序列中位置关系的能力。每个块的输出会作为下一个块的输入。
+    最后,循环结束后的x作为整个编码器的输出返回
+    '''
+````
+
+一个编码器里面可能有很多的block, 多少个block代表深度有多深(depth), yaml文件中定义是4
+
+注意的是, 扔进TransformerEncoder的还应该有position embedding, 为了学习到位置信息. 
+
+值得一提的是, enumerate函数很不错, 循环的同时能给一个迭代器方便使用(当然这里用不到迭代器数字)
+
+### 使用TransformerEncoder 组件三: MaskTransformer
+
+实现了一个带有掩码操作的Transformer编码器，这在自监督学习中常用于数据增强和特征提取
+
+````python 
+class MaskTransformer(nn.Module):
+    # 实现了一个带有掩码操作的Transformer编码器，这在自监督学习中常用于数据增强和特征提取
+    def __init__(self, config, **kwargs):
+        super().__init__()
+        self.config = config
+        # define the transformer argparse
+        self.mask_ratio = config.transformer_config.mask_ratio 
+        self.trans_dim = config.transformer_config.trans_dim
+        self.depth = config.transformer_config.depth 
+        self.drop_path_rate = config.transformer_config.drop_path_rate
+        self.num_heads = config.transformer_config.num_heads 
+        print_log(f'[args] {config.transformer_config}', logger = 'Transformer')
+        # embedding
+        self.encoder_dims =  config.transformer_config.encoder_dims
+        self.encoder = Encoder(encoder_channel = self.encoder_dims)
+
+        self.mask_type = config.transformer_config.mask_type
+
+        self.pos_embed = nn.Sequential(
+            nn.Linear(3, 128),
+            nn.GELU(),
+            nn.Linear(128, self.trans_dim),
+        )
+
+        dpr = [x.item() for x in torch.linspace(0, self.drop_path_rate, self.depth)]
+        self.blocks = TransformerEncoder(
+            embed_dim = self.trans_dim,
+            depth = self.depth,
+            drop_path_rate = dpr,
+            num_heads = self.num_heads,
+        )
+
+        self.norm = nn.LayerNorm(self.trans_dim)
+        self.apply(self._init_weights)
+````
+
+定义了掩码比率, trans_dim(在 Transformer 架构中，输入数据通常会经历一个升维的过程)(但是yaml中认为, trans_dim = encoder_dims), 深度, 多注意力机制的头数, drop_path比率. 创建了encoder实例, 确定了掩码方式, 确定了positional embedding模块, 创建了TransformerEncoder实例, 并且创造了归一化实例
+
+`nn.LayerNorm` 是 PyTorch 中的一个层归一化（Layer Normalization）模块，用于对输入张量的每个样本（batch）的特征通道进行归一化处理。层归一化是深度学习中一种常用的技术，旨在提高训练速度、稳定性和模型的泛化能力。
+
+`self.apply(self._init_weights)` 是一种在模型初始化时使用的方法，用于为模块内的所有子模块应用一个特定的权重初始化函数。初始化方式, 即``self._init_weights``定义如下: 
+
+````python 
+def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+        elif isinstance(m, nn.Conv1d):
+            trunc_normal_(m.weight, std=.02)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+````
+
+掩码方式定义如下: 
+
+````python 
+def _mask_center_block(self, center, noaug=False):
+        # 生成基于点云中心的块状掩码
+        '''
+            center : B G 3
+            --------------
+            mask : B G (bool)
+        '''
+        # skip the mask
+        if noaug or self.mask_ratio == 0:
+            return torch.zeros(center.shape[:2]).bool()
+        # mask a continuous part
+        mask_idx = []
+        for points in center:
+            # G 3
+            points = points.unsqueeze(0)  # 1 G 3
+            index = random.randint(0, points.size(1) - 1)
+            distance_matrix = torch.norm(points[:, index].reshape(1, 1, 3) - points, p=2,
+                                         dim=-1)  # 1 1 3 - 1 G 3 -> 1 G
+
+            idx = torch.argsort(distance_matrix, dim=-1, descending=False)[0]  # G
+            ratio = self.mask_ratio
+            mask_num = int(ratio * len(idx))
+            mask = torch.zeros(len(idx))
+            mask[idx[:mask_num]] = 1
+            mask_idx.append(mask.bool())
+
+        bool_masked_pos = torch.stack(mask_idx).to(center.device)  # B G
+
+        return bool_masked_pos
+
+    def _mask_center_rand(self, center, noaug = False):
+        # 生成基于随机选择的掩码
+        '''
+            center : B G 3
+            --------------
+            mask : B G (bool)
+        '''
+        B, G, _ = center.shape
+        # skip the mask
+        if noaug or self.mask_ratio == 0:
+            return torch.zeros(center.shape[:2]).bool()
+
+        self.num_mask = int(self.mask_ratio * G)
+
+        overall_mask = np.zeros([B, G])
+        for i in range(B):
+            mask = np.hstack([
+                np.zeros(G-self.num_mask),
+                np.ones(self.num_mask),
+            ])
+            np.random.shuffle(mask)
+            overall_mask[i, :] = mask
+        overall_mask = torch.from_numpy(overall_mask).to(torch.bool)
+
+        return overall_mask.to(center.device) # B G  这是一个布尔类型的张量
+````
+
+论文中推荐的是随机掩码, 那么这个随机掩码是如何实现的呢? kimi讲的比我思考的详细, 故引用kimi的讲解:
+
+在这段代码中，`_mask_center_rand` 函数的作用是生成一个随机的掩码（mask），用于数据增强或自监督学习中的特征提取。掩码是一种指示哪些数据点应该被保留，哪些应该被忽略的机制。在自监督学习中，掩码可以帮助模型学习到更加鲁棒的特征表示。
+
+函数的参数和步骤说明如下：
+
+1. **参数**：
+   - `center`：一个形状为 `[B, G, 3]` 的张量，表示中心点的位置信息。其中 `B` 是批次大小，`G` 是每个批次中的点的数量，`3` 表示三维空间中的坐标。
+   - `noaug`：一个布尔值，默认为 `False`。如果设置为 `True`，则跳过掩码操作。
+2. **掩码生成过程**：
+   - 首先，检查 `noaug` 参数或 `self.mask_ratio` 是否为0。如果是，那么不需要掩码，直接返回一个全为0的布尔张量，表示不掩码任何点。
+   - 如果需要掩码，计算需要掩码的数量 `self.num_mask`，它是通过将 `mask_ratio` 与 `G`（每个批次中的点的数量）相乘得到的。
+   - 使用 `np.zeros` 创建一个形状为 `[B, G]` 的 NumPy 数组 `overall_mask`，初始化所有值为0。
+   - 遍历每个批次 `i`：
+     - 创建一个长度为 `G` 的 NumPy 数组 `mask`，其中 `num_mask` 个值为1（表示掩码），其余 `G - num_mask` 个值为0（表示不掩码）。
+     - 使用 `np.random.shuffle(mask)` 随机打乱 `mask` 数组中的值，以确保掩码是随机的。
+     - 将打乱后的 `mask` 数组赋值给 `overall_mask` 对应的批次。
+   - 将 NumPy 数组 `overall_mask` 转换为 PyTorch 张量，并确保其数据类型为布尔型（`torch.bool`）。
+   - 使用 `to(center.device)` 确保掩码张量和输入的 `center` 张量位于同一个设备上（CPU 或 GPU）。
+3. **返回值**：
+   - 返回的 `overall_mask` 是一个布尔张量，形状为 `[B, G]`，其中的 `True` 表示对应的点被掩码（在后续操作中将被忽略），`False` 表示对应的点没有被掩码（将被保留）。
+
+那么forward方法如下: 
+
+````python 
+def forward(self, neighborhood, center, noaug = False):
+        # generate mask
+        if self.mask_type == 'rand':
+            bool_masked_pos = self._mask_center_rand(center, noaug = noaug) # B G
+        else:
+            bool_masked_pos = self._mask_center_block(center, noaug = noaug)
+
+        group_input_tokens = self.encoder(neighborhood)  #  B G C
+
+        batch_size, seq_len, C = group_input_tokens.size()
+
+        x_vis = group_input_tokens[~bool_masked_pos].reshape(batch_size, -1, C)
+        # 从 group_input_tokens 中选取那些未被掩码的点，即保留 bool_masked_pos 为 False 的位置对应的点。
+        # add pos embedding
+        # mask pos center
+        masked_center = center[~bool_masked_pos].reshape(batch_size, -1, 3)
+        pos = self.pos_embed(masked_center)
+
+        # transformer
+        x_vis = self.blocks(x_vis, pos)
+        x_vis = self.norm(x_vis)
+
+        return x_vis, bool_masked_pos
+````
+
+首先先创造掩码布尔张量, 然后根据它在embedding完成后的点里面选出可见的中心点,  
 
