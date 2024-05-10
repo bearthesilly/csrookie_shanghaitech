@@ -197,3 +197,46 @@ def build_loss_func(self, loss_type):
 
 最后大部分的注释过的代码放在了code文件里面（重要的我都尝试去理解代码是在干什么了）
 
+
+
+# 详细读Point_MAE.py
+
+## class Encode
+
+````python 
+class Encoder(nn.Module):   ## Embedding module
+    def __init__(self, encoder_channel):
+        super().__init__()
+        self.encoder_channel = encoder_channel
+        self.first_conv = nn.Sequential(
+            nn.Conv1d(3, 128, 1), # 将输入的3维特征（点云中的x, y, z坐标）转换成128维的特征，使用1维卷积
+            nn.BatchNorm1d(128), # 批量归一化层，用于规范化上一层的输出
+            nn.ReLU(inplace=True), # 参数inplace=True意味着ReLU的计算将在输入数据的内存位置上直接进行
+            nn.Conv1d(128, 256, 1) # 将128维的特征进一步转换成256维
+        )
+        self.second_conv = nn.Sequential(
+            nn.Conv1d(512, 512, 1), # 512 = 256(first_conv得到) +(concat) 256(maxpooling)
+            nn.BatchNorm1d(512),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(512, self.encoder_channel, 1) # 将512维的特征转换成encoder_channel维，这个维度是模型配置中指定的
+        )
+        '''
+        nn.Conv1d(in_channels, out_channels, kernel_size):
+        输入数据的通道数;输出数据的通道数;卷积核（或滤波器）的大小
+        '''
+````
+
+在初始化中 
+
+
+
+
+
+
+
+
+
+
+
+
+
