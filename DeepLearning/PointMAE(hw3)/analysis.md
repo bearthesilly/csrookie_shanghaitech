@@ -637,7 +637,7 @@ def _mask_center_block(self, center, noaug=False):
         return overall_mask.to(center.device) # B G  这是一个布尔类型的张量
 ````
 
-论文中推荐的是随机掩码, 那么这个随机掩码是如何实现的呢? kimi讲的比我思考的详细, 故引用kimi的讲解:
+论文中推荐的是随机掩码, 那么这个随机掩码中心点如何实现的呢? kimi讲的比我思考的详细, 故引用kimi的讲解:
 
 在这段代码中，`_mask_center_rand` 函数的作用是生成一个随机的掩码（mask），用于数据增强或自监督学习中的特征提取。掩码是一种指示哪些数据点应该被保留，哪些应该被忽略的机制。在自监督学习中，掩码可以帮助模型学习到更加鲁棒的特征表示。
 
@@ -687,5 +687,400 @@ def forward(self, neighborhood, center, noaug = False):
         return x_vis, bool_masked_pos
 ````
 
-首先先创造掩码布尔张量, 然后根据它在embedding完成后的点里面选出可见的中心点,  
+首先先创造掩码布尔张量, 然后根据它在embedding完成后的点里面选出可见的中心点,  而根据论文, 掩码之后的中心点(未进行embedding)会进行positional embedding; 可见的中心点和不可见的点的positional embdding 会一同进入transformer
+
+值得注意的是, 这一步里面已经实现了潜空间的embedding了
+
+### 组件四: class TransformerDecoder
+
+````python 
+class TransformerDecoder(nn.Module):
+    # Transformer解码器逐步处理输入数据的特征表示，并将解码器的输出用于生成或预测任务
+    def __init__(self, embed_dim=384, depth=4, num_heads=6, mlp_ratio=4., qkv_bias=False, qk_scale=None,
+                 drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1, norm_layer=nn.LayerNorm):
+        super().__init__()
+        self.blocks = nn.ModuleList([
+            Block(
+                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                drop=drop_rate, attn_drop=attn_drop_rate,
+                drop_path=drop_path_rate[i] if isinstance(drop_path_rate, list) else drop_path_rate
+            )
+            for i in range(depth)])
+        self.norm = norm_layer(embed_dim) # 一个层归一化层，用于规范化解码器的输出
+        self.head = nn.Identity()
+
+        self.apply(self._init_weights) # 使用_init_weights方法对模型的权重进行初始化
+    '''
+    embed_dim:输入特征的维度。
+    depth:Transformer解码器块的数量。
+    num_heads:每个自注意力机制中的头数。
+    mlp_ratio:多层感知机(MLP)隐藏层维度与输入维度的比例。
+    qkv_bias:是否在线性层中添加偏置。
+    qk_scale:注意力机制中的缩放因子。
+    drop_rate:MLP中Dropout的比率。
+    attn_drop_rate:自注意力机制中Dropout的比率。
+    drop_path_rate:DropPath正则化的比率,可以是一个列表或单个值。
+    norm_layer:归一化层的类型,默认为nn.LayerNorm。
+    '''
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight) # 对于线性层（nn.Linear），使用Xavier均匀分布初始化权重，并初始化偏置为0
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    def forward(self, x, pos, return_token_num):
+        for _, block in enumerate(self.blocks):
+            x = block(x + pos)
+
+        x = self.head(self.norm(x[:, -return_token_num:]))  # only return the mask tokens predict pixel
+        # 只取x的最后一部分（由return_token_num指定的元素数量），经过层归一化和恒等映射处理后作为输出
+        return x
+    '''
+    使用一个for循环遍历self.blocks中的每个Block实例。
+    在每次迭代中,将当前块应用于输入x,同时将x与位置编码pos相加,以融入位置信息。
+    循环结束后,通过层归一化self.norm和恒等映射self.head处理x的最后return_token_num个元素,
+    通常这些元素代表解码器的输出,如预测的像素或标记。
+    '''
+````
+
+`nn.Identity`是一个模块，它的作用是返回输入的副本而不进行任何改变。简单来说，`nn.Identity`可以被看作是一个“直通”层，它不改变数据的任何属性，只是将输入原样传递到输出。
+
+注意这里面没有把norm完成后的数据转化为点云三维的正常数据, 这一步之后会实现
+
+`nn.LayerNorm`（层归一化）是一种在深度学习模型中常用的技术, 对输入数据的每个样本的每个特征维度进行归一化处理，使其具有均值为0和方差为1的分布。层归一化的主要目的是稳定训练过程，加快收敛速度，并有助于减少内部协变量偏移（Internal Covariate Shift），即确保网络层输入的分布不会因为网络层参数的变化而发生大的变化。
+
+``x[:, -return_token_num:]``是为了只关注被掩码的部分和原来掩码的部分的相似度. 一开始还好奇, 为什么倒着取return_token_num个就能够是取出新生成的内容? 后来想想, 其实是机器不断学习, 使得最后输出的倒数这么多个内容是尽可能接近被掩码的部分(不知道这样的理解是不是正确的)
+
+当然, 也是因为事实上, 输入的时候,不论是潜空间数据还是位置编码数据, ***最后N个的数据全都是属于被掩码的数据,*** 然后用一堆0来代替这N个潜空间数据(空间), 希望最后产出的这N个都是十分贴近原来被掩码的部分. 
+
+``x_full = torch.cat([x_vis, mask_token], dim=1)`` (from class Point_MAE, mask_token是什么就在下面有说明) 
+
+##  class Point_MAE——拼接所有组件
+
+````python 
+class Point_MAE(nn.Module):
+    '''
+    super().__init__():调用基类nn.Module的构造函数。
+    self.config:存储模型的配置信息。
+    self.MAE_encoder:创建一个MaskTransformer实例,用于编码器部分。
+    self.group_size和self.num_group:定义点云分组的大小和数量。
+    self.mask_token:定义一个掩码标记，用于在解码器中表示掩码位置。
+    self.decoder_pos_embed:定义一个位置嵌入网络，用于将点的位置信息编码成特征。
+    self.MAE_decoder:创建一个TransformerDecoder实例,用于解码器部分。
+    self.group_divider:创建一个Group实例,用于将点云分割成多个局部组。
+    self.increase_dim:定义一个网络，用于将解码器的输出增加到所需的维度。
+    self.build_loss_func(self.loss):根据配置中的损失函数类型,构建损失函数。
+    '''
+    def __init__(self, config):
+        super().__init__()
+        print_log(f'[Point_MAE] ', logger ='Point_MAE')
+        self.config = config
+        self.trans_dim = config.transformer_config.trans_dim
+        self.MAE_encoder = MaskTransformer(config)
+        self.group_size = config.group_size
+        self.num_group = config.num_group
+        self.drop_path_rate = config.transformer_config.drop_path_rate
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, self.trans_dim))
+        self.decoder_pos_embed = nn.Sequential(
+            nn.Linear(3, 128),
+            nn.GELU(),
+            nn.Linear(128, self.trans_dim)
+        )
+
+        self.decoder_depth = config.transformer_config.decoder_depth
+        self.decoder_num_heads = config.transformer_config.decoder_num_heads
+        dpr = [x.item() for x in torch.linspace(0, self.drop_path_rate, self.decoder_depth)]
+        self.MAE_decoder = TransformerDecoder(
+            embed_dim=self.trans_dim,
+            depth=self.decoder_depth,
+            drop_path_rate=dpr,
+            num_heads=self.decoder_num_heads,
+        )
+
+        print_log(f'[Point_MAE] divide point cloud into G{self.num_group} x S{self.group_size} points ...', logger ='Point_MAE')
+        self.group_divider = Group(num_group = self.num_group, group_size = self.group_size)
+
+        # prediction head
+        self.increase_dim = nn.Sequential(
+            # nn.Conv1d(self.trans_dim, 1024, 1),
+            # nn.BatchNorm1d(1024),
+            # nn.LeakyReLU(negative_slope=0.2),
+            nn.Conv1d(self.trans_dim, 3*self.group_size, 1)
+        )
+
+        trunc_normal_(self.mask_token, std=.02)
+        self.loss = config.loss
+        # loss
+        self.build_loss_func(self.loss)
+````
+
+初始化的时候, 创建了: MaskTransformer, decoder_pos_embed(位置嵌入), TransformerDecoder, increase_dim(最后解码器输出内容转化为embedding前的形式), Group实例
+
+这样一来, 分组+embedding+encoder+decoder+decoder->正常数据结构+center的positional embedding全部准备好了
+
+这里的loss function 采用的是chamferdist2(论文中的)
+
+````python 
+    def build_loss_func(self, loss_type):
+        if loss_type == "cdl1":
+            self.loss_func = ChamferDistanceL1().cuda()
+        elif loss_type =='cdl2':
+            self.loss_func = ChamferDistanceL2().cuda()
+        else:
+            raise NotImplementedError
+````
+
+````python 
+    def forward(self, pts, vis = False, **kwargs):
+        '''
+        使用self.group_divider将点云分割成多个局部组。
+        使用self.MAE_encoder对点云进行编码,得到可见部分的特征和掩码。
+        对中心点应用位置嵌入，生成可见点和掩码点的位置嵌入。
+        将可见特征、掩码标记和位置嵌入组合m输入到self.MAE_decoder进行解码。
+        使用self.increase_dim将解码器的输出转换为点云的预测。
+        计算重建的点云和原始点云之间的损失。
+        如果vis标志为真m生成可视化所需的数据并返回:否则m只返回损失。
+        '''
+        neighborhood, center = self.group_divider(pts)
+
+        x_vis, mask = self.MAE_encoder(neighborhood, center)
+        B,_,C = x_vis.shape # B VIS C
+
+        pos_emd_vis = self.decoder_pos_embed(center[~mask]).reshape(B, -1, C)
+
+        pos_emd_mask = self.decoder_pos_embed(center[mask]).reshape(B, -1, C)
+
+        _,N,_ = pos_emd_mask.shape
+        mask_token = self.mask_token.expand(B, N, -1)
+        x_full = torch.cat([x_vis, mask_token], dim=1)
+        pos_full = torch.cat([pos_emd_vis, pos_emd_mask], dim=1)
+
+        x_rec = self.MAE_decoder(x_full, pos_full, N)
+
+        B, M, C = x_rec.shape
+        rebuild_points = self.increase_dim(x_rec.transpose(1, 2)).transpose(1, 2).reshape(B * M, -1, 3)  # B M 1024
+
+        gt_points = neighborhood[mask].reshape(B*M,-1,3)
+        loss1 = self.loss_func(rebuild_points, gt_points)
+````
+
+forward方法中,  首先拿到中心点以及对应的neighborhoods, 然后放进带有掩码功能的embedding+encoder, 得到潜空间形式的且可见的编码器产出的tokens(原论文图片中的绿色方块, ``x_vis``), 以及拿到掩码的点的全局引索:
+
+````python
+neighborhood, center = self.group_divider(pts)
+x_vis, mask = self.MAE_encoder(neighborhood, center)
+B,_,C = x_vis.shape # B VIS C
+````
+
+然后按照论文, 将center中被掩码的和不被掩码的中心点都进行positional embedding, 并用N字母代表被掩码的中心点的数量:
+
+````python 
+pos_emd_vis = self.decoder_pos_embed(center[~mask]).reshape(B, -1, C)
+pos_emd_mask = self.decoder_pos_embed(center[mask]).reshape(B, -1, C)
+_,N,_ = pos_emd_mask.shape
+````
+
+为了将那些被掩码的部分顺利扔进decoder, 用下面这个式子创造出一堆的0, 然后进行expand和cat实现decoder的总输入:
+
+``self.mask_token = nn.Parameter(torch.zeros(1, 1, self.trans_dim))``
+
+并且最后也是将x_vis(绿色部分)l和未见的位置掩码拼接;`` x_full, pos_full``这两个参数都是需要进入transformer里面的; 最后这两个都扔进MAE_decoder
+
+***注意: 下图中所有的token其实都包含两层信息: 潜空间形式的数据以及位置嵌入信息; 其中masked其实是潜空间数据全都是0, 但是位置编码都还在!*** 
+
+````python 
+mask_token = self.mask_token.expand(B, N, -1)
+x_full = torch.cat([x_vis, mask_token], dim=1)
+pos_full = torch.cat([pos_emd_vis, pos_emd_mask], dim=1)
+x_rec = self.MAE_decoder(x_full, pos_full, N)
+````
+
+最后, 数据从潜空间变为正常三维形式, 然后和ground_truth进行损失函数(chamfer distance2)的计算, 最后返回损失.
+
+````python
+B, M, C = x_rec.shape
+rebuild_points = self.increase_dim(x_rec.transpose(1, 2)).transpose(1, 2).reshape(B * M, -1, 3)  
+gt_points = neighborhood[mask].reshape(B*M,-1,3)
+loss1 = self.loss_func(rebuild_points, gt_points)
+return loss1
+````
+
+![image](img/1.png)
+
+
+
+# 结语
+
+至此, Point-MAE模型的构建完全结束, register to module (``@MODELS.register_module()``)
+
+在训练的时候, optimizer选择了AdamW优化器, Scheduler选择了CosLR来衰减学习率
+
+一开始读代码, 十分痛苦, 但是越读收获越多,直至终于理解八九不离十. 
+
+最重要的转折点还是我偶然在分析完github上面一份关于pytorch实战讲解的一份代码: 
+
+````python
+import torch
+import torch.nn as nn
+import torchvision
+import torchvision.transforms as transforms
+
+
+# Device configuration
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# 这行代码检查是否有可用的CUDA（GPU），如果有则使用GPU进行训练，否则使用CPU。
+# Hyper-parameters 
+input_size = 784 
+'''
+MNIST 数据集中的手写数字图像是 28x28 像素的。
+由于这是一个全连接(fully connected)的神经网络，我们需要将每个图像展平成一个一维的向量，以便它可以作为网络的输入。
+'''
+hidden_size = 500
+num_classes = 10
+num_epochs = 5
+batch_size = 100
+learning_rate = 0.001
+
+# MNIST dataset 
+train_dataset = torchvision.datasets.MNIST(root='../../data', 
+                                           train=True, 
+                                           transform=transforms.ToTensor(),  
+                                           download=False)
+
+test_dataset = torchvision.datasets.MNIST(root='../../data', 
+                                          train=False, 
+                                          transform=transforms.ToTensor())
+'''
+download参数默认是False;如果是True,且没有在root里面找到数据集,那么就会自动下载 
+transform=transforms.ToTensor()将数据转化为了张量
+train: 一个布尔值，指示是否加载训练集。第一个调用中设置为 True 来加载训练数据，第二个调用中设置为 False 来加载测试数据。
+'''
+# Data loader
+train_loader = torch.utils.data.DataLoader(dataset=train_dataset, 
+                                           batch_size=batch_size, 
+                                           shuffle=True)
+# 测试阶段，我们通常不需要打乱数据
+test_loader = torch.utils.data.DataLoader(dataset=test_dataset, 
+                                          batch_size=batch_size, 
+                                          shuffle=False)
+
+# Fully connected neural network with one hidden layer
+class NeuralNet(nn.Module):
+    def __init__(self, input_size, hidden_size, num_classes):
+        super(NeuralNet, self).__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size) 
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(hidden_size, num_classes)  
+    
+    def forward(self, x):
+        out = self.fc1(x)
+        out = self.relu(out)
+        out = self.fc2(out)
+        return out
+
+model = NeuralNet(input_size, hidden_size, num_classes).to(device)
+
+# Loss and optimizer
+criterion = nn.CrossEntropyLoss()
+# 组合损失函数,将 nn.LogSoftmax 逻辑softmax层和负对数似然损失（negative log likelihood loss）组合在一起。
+# 这个损失函数通常用于多分类问题。
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)  
+# .parameters方法来自nn.Module; 包括权重（weights）和偏置（biases）
+# 这些参数在模型训练过程中通过优化算法进行调整，以最小化损失函数。
+# 大多数情况下，权重是随机生成的，而偏置默认为0或者也是随机值
+# 且有requires_grad成员属性,代表着是否参与梯度计算
+# Train the model
+total_step = len(train_loader)
+for epoch in range(num_epochs):
+    for i, (images, labels) in enumerate(train_loader):  
+        '''
+        enumerate 返回一个由元组组成的迭代器，每个元组包含一对元素：索引和被 enumerate 作用的可迭代对象中对应的元素。
+        每个元素实际上是一个批次的数据，通常是一个包含两个张量(tensor)的元组：(images, labels)
+        '''
+        # Move tensors to the configured device
+        images = images.reshape(-1, 28*28).to(device)
+        # torch.Size([100, 784]),为了能够放进nn.Linear
+        labels = labels.to(device)
+        # torch.Size([100])
+        # Forward pass
+        outputs = model(images)
+        # torch.Size([100, 10])
+        '''
+        当你执行 model(images):
+        PyTorch 查看 model 对象，发现它是一个 nn.Module 的子类实例。
+        PyTorch 重载了 nn.Module 的 __call__ 方法，所以当你尝试以这种方式调用 model 时，它实际上调用了模型的 __call__ 方法。
+        在 nn.Module 的 __call__ 实现中，当触发一个模型对象的调用时，它会自动寻找并执行模型类的 forward 方法。
+        forward 方法是模型的前向传播逻辑所在，它接收输入数据 images,通过模型内部定义的层进行一系列计算,然后返回计算得到的输出 outputs。
+        '''
+        loss = criterion(outputs, labels)
+        
+        # Backward and optimize
+        optimizer.zero_grad() # 防止梯度累加
+        loss.backward() # 反向传播
+        optimizer.step() # 更新参数
+        
+        if (i+1) % 100 == 0:
+            print ('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}' 
+                   .format(epoch+1, num_epochs, i+1, total_step, loss.item()))
+
+# Test the model
+# In test phase, we don't need to compute gradients (for memory efficiency)
+# 用于临时禁用在代码块内部的所有计算图和梯度计算。这通常用于模型的评估阶段
+with torch.no_grad():
+    correct = 0
+    total = 0
+    for images, labels in test_loader:
+        images = images.reshape(-1, 28*28).to(device)
+        labels = labels.to(device)
+        outputs = model(images)
+        _, predicted = torch.max(outputs, 1)
+        # torch.max(outputs, 1) 返回了两个张量：每个样本最大得分的张量和最大得分索引的张量
+        total += labels.size(0) # 这里是100,batch_size
+        correct += (predicted == labels).sum().item()
+        '''
+        发生了以下几步操作：
+        predicted == labels: 这是一个比较操作,predicted 是模型预测的类别索引，而 labels 是数据集中的真实类别索引。
+        这个操作会生成一个布尔类型的张量，其中的每个元素都是 True 或 False,取决于预测的类别索引是否与真实标签相匹配。
+        .sum(): 这个函数会对布尔张量进行求和，其中 True 被当作 1,False 被当作 0。求和操作会计算出在当前批次中模型预测正确的样本数量。
+        .item(): 这个函数将求和得到的标量张量转换为一个普通的Python数字(int 或 float)。
+        由于 .sum() 返回的是一个张量，使用 .item() 可以将这个张量中的单个值提取出来,以便可以进行后续的Python算术操作。
+        '''
+
+    print('Accuracy of the network on the 10000 test images: {} %'.format(100 * correct / total))
+
+# Save the model checkpoint
+torch.save(model.state_dict(), 'model.ckpt')
+'''
+总结流程:
+首先是利用torchvision.datasets.MNIST()(这里是MNIST)来生成train and test dataset
+然后利用上面的datasets,通过torch.utils.data.DataLoader()方法生成train and test dataloader,注意batch_size and shuffle
+之后创造模型类,继承nn.Module(注意super(NeuralNet, self).__init__());然后在自己的__init__定义fc,激活函数等
+然后定义类的forward方法,即网络组成;同时注意从这里开始,.to(device)要纳入考量
+定义完了类,创造一个model实例;紧接着配套上loss函数和优化器(注意model.parameters()来获得w b)
+开始训练,一个epoch遍历完全部的数据一次;注意for i, (images, labels) in enumerate(train_loader)
+然后获取images and labels,注意reshape和.to(device);model(images)训练一批次
+一批次训练结束之后,优化器梯度清空,反向传播,优化器更新模型参数
+最后评估,注意torch.max()方法和correct += (predicted == labels).sum().item()
+以及非常重要的with torch.no_grad():,让梯度不再纳入计算的考量之中
+'''
+````
+
+注释全都是我自己写的, 这份代码让我意识到一个深度学习工程的核心关键: 
+
+- Dateset Dateloader model optimizer scheduler 的关系是什么? 
+
+- 数据的张量形状非常重要!
+- model最后返回loss, 类似于``loss``这样的参数其实就是在代表模型的实例
+- loss.backward()是反向传播; optimizer.step()是在更新参数, optimizer.zero_grad() 是防止梯度累加
+- 为什么这些方法能够自动进行很多操作? 这些都是nn.Module等功能在操作, 也就是为什么会super继承
+- .reshape()  .permutate()   torch.max()   .view()   .expand()   torch.cat()   torch.arrange()等方法的用途
+
+理解了之后, 就能知道每一部分究竟在干什么. 那么事实上, 此次分析的代码, 就是在构建一个自己的Point-MAE model.
+
+真的不容易, 但是终究是"算是拿下了吧"~
+
+
 
