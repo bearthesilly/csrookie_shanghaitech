@@ -91,7 +91,9 @@ TypeError: ABCMeta is not subscriptable
 
 最后手动下载modelnet的数据集（由于计算节点不能联网，所以什么都不做然后跑第一次，会报错无法连接上一个下载这个数据集的网站，因此我们手动连接上这个网站就可以了）最后就成功了
 
-最后可以在conda里面Install一个``nvitop``, 然后单独开一个窗口，进入计算节点+conda环境，输入``nvitop``就能看到显卡的运行情况 
+最后可以在conda里面Install一个``nvitop``, 然后单独开一个窗口，进入计算节点+conda环境，输入``nvitop``就能看到显卡的运行情况: 
+
+![image](png/4.jpg)
 
 为了显卡能够充分利用功率，可以适当提高batch_size的大小，一般是以*2的形式尝试
 
