@@ -142,3 +142,141 @@ POINTBERT_CONFIG = './models/pointbert/PointTransformer_8192point.yaml'
          return x * torch.sigmoid(1.702 * x)
  ````
 
+LayerNorm接受一个张量, 首先检查里面的数据类型, 然后进行为了保证nn.LayerNorm能够运行, 于是在forward方法之前先数据转化为fp32, 然后得到的结果最后数据转化为fp16
+
+``QuickGELU``向前传播是``GELU(x) = x * Φ(x)``, 同时为什么是quick? 因为使用了``torch.sigmoid``来避免复杂的分段计算
+
+GELU 是一种近年来在深度学习模型中非常流行的激活函数，**特别是在 Transformer 架构和其衍生模型中。**
+
+接下来定义了``ResidualAttentionBlock`
+
+````python
+class ResidualAttentionBlock(nn.Module):
+    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None):
+        super().__init__()
+
+        self.attn = nn.MultiheadAttention(d_model, n_head)
+        self.ln_1 = LayerNorm(d_model)
+        self.mlp = nn.Sequential(OrderedDict([
+            ("c_fc", nn.Linear(d_model, d_model * 4)),
+            ("gelu", QuickGELU()),
+            ("c_proj", nn.Linear(d_model * 4, d_model))
+        ]))
+        self.ln_2 = LayerNorm(d_model)
+        self.attn_mask = attn_mask
+'''
+d_model: 模型的维度，对应于输入和输出的特征维度。
+n_head: 注意力机制中的头数，用于实现多头注意力。
+attn_mask: 一个可选的注意力掩码，用于在注意力计算中屏蔽某些项。
+'''
+    def attention(self, x: torch.Tensor):
+        self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
+# 注意 self.attn_mask.to(dtype=x.dtype, device=x.device)
+        return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
+# need_weights=False 表示不需要注意力权重
+'''
+nn.MultiheadAttention 前向传播方法 forward 默认返回一个包含两个张量的元组（tuple）：
+第一个张量：是经过注意力加权的输出，也就是不同头的输出拼接起来的结果，这个输出可以直接传递到模型的下一层。
+第二个张量：是注意力权重本身，每个头的注意力权重被拼接起来，通常用于分析或者调试，以了解模型在注意力机制中关注的序列区域。
+'''
+    def forward(self, x: torch.Tensor):
+        x = x + self.attention(self.ln_1(x))
+        x = x + self.mlp(self.ln_2(x))
+        return x
+````
+
+从名字就能看出来, 这个网络里面含有残差思想; 首先定义了归一化层和多层感知机,  并且定义了注意力机制的掩码设置. 在向前传播中, 数据首先先进行归一化, 然后通过注意力机制, 最后和原结果相加, 形成残差连接; 然后再归一化之后进入多层感知机, 得到的结果与上一个状态的x相加, 最后输出是经过这两部处理后的x
+
+值得注意``attn_mask.to(...)`` 和 ``nn.MultiheadAttention``函数的使用, 以及残差思想的运用
+
+有了这个核心的block, 就能定义transformer了
+
+````python
+class Transformer(nn.Module):
+    def __init__(self, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None):
+        super().__init__()
+        self.width = width
+        self.layers = layers
+        self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask) for _ in range(layers)])
+        
+    def forward(self, x: torch.Tensor):
+        return self.resblocks(x)
+````
+
+一个resblocks由很多个block构成
+
+最后, Point-Bind呼之欲出
+
+````python
+class POINTBIND(nn.Module):
+    def __init__(self, point_encoder, pc_feat_dims):
+        super().__init__()
+        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
+        self.bind = imagebind_model.imagebind_huge().eval().cuda()
+
+        self.point_encoder = point_encoder
+        self.pc_projection = nn.Parameter(torch.empty(pc_feat_dims, 512))
+        nn.init.normal_(self.pc_projection, std=512 ** -0.5)
+'''
+point_encoder: 一个用于编码3D点云数据的模型。
+pc_feat_dims: 3D点云特征的维度。
+logit_scale: 一个可学习的参数，用于对模型输出的对数几率进行缩放，初始化为 np.log(1 / 0.07)。
+bind: 一个预训练的 ImageBind 模型，用于处理图像和文本模态，这里使用的是 imagebind_huge 版本，并设置为评估模式（eval()），然后转移到CUDA设备上。
+pc_projection: 一个可学习的参数，用于将点云特征投影到512维的空间中。初始化时使用正态分布。
+'''
+    def encode_pc(self, pc):
+        pc_feat = self.point_encoder(pc)
+        pc_embed = pc_feat @ self.pc_projection
+        return pc_embed
+
+    def forward(self, pc, text, image=None):
+        inputs = {
+            ModalityType.TEXT: text.squeeze().cuda(),
+            ModalityType.VISION: image,
+        }
+        # 以字典形式输入预训练模型
+        with torch.no_grad(): # 注意梯度不要计算, 因为是预测模式
+            embeddings = self.bind(inputs)
+        image_embed = embeddings[ModalityType.VISION]
+        text_embed_all = embeddings[ModalityType.TEXT]
+
+        pc_embed = self.encode_pc(pc)
+        pc_embed = self.bind.modality_head_point(pc_embed)
+        pc_embed = self.bind.modality_postprocessor_point(pc_embed)
+# pc_embed 还会通过 ImageBind 模型的点云模态头 modality_head_point 和后处理modality_postprocessor_point 进行进一步的处理，以确保它与模型的多模态嵌入空间兼容。
+        return {'text_embed': text_embed_all,
+                'pc_embed': pc_embed,
+                'image_embed': image_embed,
+                'logit_scale': self.logit_scale.exp()}
+````
+
+事实上, pc_embed text_embed image_embed三个嵌入全都是分别的两个模型来实现的, 当然, 需要训练的是projection参数, 这个参数是将编码后的点云特征投射到512维空间的权重矩阵, 投射后的embed还需要经过处理以进一步与多模态空间兼容(应该是imagebind的要求)
+
+## Point-LLM Pipeline
+
+![image](img/7.png)
+
+Pipeline: 
+
+1. **Point-Bind 模型**：作为基础，"Point-LLM" 使用 "Point-Bind" 模型来获得3D点云的嵌入表示。"Point-Bind" 通过将3D点云与多模态数据（如图像、文本和音频）对齐，生成一个联合嵌入空间。
+2. **大型语言模型（LLM）**："Point-LLM" 将 "Point-Bind" 的语义信息注入到一个预训练的大型语言模型中，如 LLaMA。这样做可以使语言模型理解和响应3D点云条件下的语言指令。
+3. **参数高效微调技术**：为了将 "Point-Bind" 的语义注入到 LLM 中，"Point-LLM" 使用了参数高效的微调技术。这意味着不是整个模型都被微调，而是只调整模型中的一小部分参数，以节省资源并提高效率。
+4. **绑定网络（Bind Network）**：在 "Point-LLM" 中，使用了一个绑定网络来桥接 "Point-Bind" 和 LLaMA。这个绑定网络帮助将3D点云的特征与语言模型的空间对齐。
+5. **视觉缓存模型（Visual Cache Model）**：为了在推理时提高3D几何理解的质量，"Point-LLM" 使用了一个视觉缓存模型。这个模型在训练时不使用，但在推理时用来增强3D特征，以适应2D-3D编码器之间的语义差异。
+
+实际上，LLaMA（Large Language Model AI）是一个大型的语言模型，它主要处理的是文本数据。LLaMA 模型通常在大量文本上进行预训练，以学习语言的深层次特征，使其能够理解和生成自然语言。
+
+作者们介绍如何将3D点云数据与多模态数据（包括文本、图像、音频等）结合起来，以实现更丰富的3D理解和生成任务。这里的 "Point-LLM" 是一个扩展模型，它在预训练的 LLaMA 模型的基础上进行了微调，使其能够处理3D点云数据。
+
+具体来说，"Point-LLM" 的工作包括以下几个方面：
+
+1. **多模态联合嵌入空间**：通过 "Point-Bind" 模型，作者们构建了一个联合嵌入空间，将3D点云与图像、文本、音频等模态的数据对齐。
+2. **3D点云编码**：使用特定的3D编码器（如 "PointBERT" 或 "I2P-MAE"）来处理3D点云数据，并生成嵌入表示。
+3. **参数高效微调**：利用参数高效的微调技术，将3D点云的语义信息注入到预训练的 LLaMA 模型中，而不需要3D指令数据。
+4. **3D指令跟随和问答**："Point-LLM" 能够响应包含3D点云条件的语言指令，并进行3D问答，这表明模型能够结合3D空间几何特征和语言信息。
+5. **多模态推理**："Point-LLM" 不仅能够处理3D点云数据，还能够结合图像、音频等其他模态的数据进行跨模态推理。
+
+
+
+
+
