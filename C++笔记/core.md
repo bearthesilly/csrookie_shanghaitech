@@ -78,7 +78,13 @@
 
 ​		Local non- static : every member is initialized to indeterminate values (in other 		words, uninitialized). (未初始化)
 
-
+25. Default-initialization of a std::string will produce an empty string. (不是undefined)
+26. ``string.size()``返回字符串长度; ``string.empty()``判断是否是空字符串
+27. At least one operand of ``+`` should be ``std::string ``
+28. References must be bound to existing objects; References are not objects
+29. Use references in range- for: ``for (char &c : str){for (char &c : str)}``
+30. ``std::vector`` is not a type itself. It must be combined with some  to form a type.
+31. 
 
 
 
