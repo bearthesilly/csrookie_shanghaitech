@@ -84,7 +84,34 @@
 28. References must be bound to existing objects; References are not objects
 29. Use references in range- for: ``for (char &c : str){for (char &c : str)}``
 30. ``std::vector`` is not a type itself. It must be combined with some  to form a type.
-31. 
+31. C++中, ``const int maxn = 1000; int a[maxn]; // a normal array in C++, but VLA in C``
 
+32. Almost all implicit narrowing conversions in C++ is banned. 
 
+33. ````c++
+    const int cival = 42;
+    int &ref = const_cast<int &>(cival); // compiles, but dangerous
+    ++ref; // undefined behavior (may crash)
+    ````
+
+34. ``auto str = "hello"; // `const char *`` ``auto it = vs.begin();``
+
+    ``auto lam = [](int x, int y) { return x + y; } // A lambda expression.``
+
+35. decltype(expr) will deduce the type of the expression expr without evaluating it.
+
+36. Pass an array by reference: 
+
+````c++
+void print(const int (&arr)[100]) {
+	for (auto x : arr) // OK. `arr` is an array.
+		std::cout << x << ' ';
+	std::cout << '\n';
+}
+````
+
+37. In a const member function, calling a non- const member function on *this is not allowed.
+38. For a const object, only const member functions can be called on it.
+39. Data members are initialized **in order in which they are declared**.
+40. 类中声明的指针是***无法***被默认初始化为 nullptr(惨痛教训)
 
