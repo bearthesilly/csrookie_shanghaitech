@@ -113,10 +113,30 @@ void print(const int (&arr)[100]) {
 37. In a const member function, calling a non- const member function on *this is not allowed.
 38. For a const object, only const member functions can be called on it.
 39. Data members are initialized **in order in which they are declared**.
-40. 类中声明的指针是***无法***被默认初始化为 nullptr(惨痛教训)(=default)
-
+40. 类中声明的指针是***无法***被默认初始化为 nullptr(惨痛教训)(=default)(除非in-class有定义)
 41. ``new [0] ``may also allocate some memory which should also be deallocated
-42. 
+42. If the class does not have a user-declared copy constructor, the compiler will try to synthesize one. The synthesized one will copy-initialize all the members
+43. By saying ``= delete`` , we define a deleted copy constructor. (拒绝复制构造)
+44. ``a = b`` is equivalent to ``a.operator=(b) ``.
+45. ``operator=`` returns reference to the **left-hand** side object. It is ``*this``.别忘了delete
+46. copy和move问题都需要考虑self-assignment的corner-case
+47. A ``static`` data member: 它属于类, 而不属于任何object, 因此静态类方法没有this指针
+48. A ``friend`` is not a member! 友元声明在类的任何地方都可以(一般是最开始或最后)
+49. A member function can be declared in the class body, and then defined outside.
+50. 只声明一个类, 但是啥也不知道, 那么就是incomplete type, 只能给它声明指针或引用
+51.  析构函数结束后, 类内所有成员都会被自动摧毁, 摧毁顺序是声明顺序的逆序!
+52. 默认析构函数**不会**自动释放指针指向的内存
+53. 
+
+
+
+
+
+
+
+
+
+
 
 
 
