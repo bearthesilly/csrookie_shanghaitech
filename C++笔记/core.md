@@ -113,5 +113,16 @@ void print(const int (&arr)[100]) {
 37. In a const member function, calling a non- const member function on *this is not allowed.
 38. For a const object, only const member functions can be called on it.
 39. Data members are initialized **in order in which they are declared**.
-40. 类中声明的指针是***无法***被默认初始化为 nullptr(惨痛教训)
+40. 类中声明的指针是***无法***被默认初始化为 nullptr(惨痛教训)(=default)
+
+41. ``new [0] ``may also allocate some memory which should also be deallocated
+42. 
+
+
+
+
+
+
+
+
 
