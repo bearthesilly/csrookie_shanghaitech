@@ -241,7 +241,23 @@ LSTM全称为Long-Short-Term-Memory.
 
 ![iamge](img/33.png)
 
-### GloVe
+## Sentiment classification
+
+尝试从text推测出情感的程度. 例如对一个餐馆的评价, 如何从一段文本推测出客户心中餐馆的分数呢? 
+
+![image](img/34.png)
+
+一种方法是所有单词乘以嵌入矩阵之后, 所有的嵌入空间维度的向量求和取平均, 然后这一个向量输入进softmax. 这貌似已经很不错了, 但是其实也有问题: 上图中的负面评论, 出现了三次good, 这很可能导致最后判断的情感是正面的. 
+
+为了解决这种问题, 需要意识到"位置"信息的存在, 因为not的存在, 所以这里的good不是good. 所以说, RNN可以派上用场. 
+
+![image](img/35.png)
+
+# Sequence to sequence model 
+
+## Basic Model
+
+
 
 
 
