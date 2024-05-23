@@ -257,11 +257,51 @@ LSTM全称为Long-Short-Term-Memory.
 
 ## Basic Model
 
+首先是sequence to sequence model, 考虑一个RNN模型, 单元可以是GNU或者LSTM, 然后要求法英互译. 那么法语文本之后, 每个单词都按照RNN的流程进入模型, 但是最后输出的是一个编码后的矩阵, 然后再用解码器去输出文本, 每输出一个单词之后, 这个输出的单词用作下一个单元的输入(当然这一单元的隐含特征也会输入下一个单元)
+
+![image](img/36.png)
+
+其次就是经典的image captioning任务. 给一张图片, 然后要求生成captioning(描述)文字, 那么就可把卷积之后的特征矩阵输入进RNN模型.
+
+![image](img/37.png)
+
+## The most possible sentence
+
+![image](img/38.png)
+
+一个languang model 一般来说输入的x0都是零向量, 从而接连输出文本. 那么seq2seq呢? 前面是一个RNN模型, 输出一个"特征隐含矩阵"输入RNN模型, 然后输出文本, 这输出部分和language model非常相似, 因此, 翻译也被称为"Conditional Language Model".
+
+![image](img/39.png)
+
+在翻译的输出部分, 我们希望找到合适的y(翻译内容)使得概率最大(x是法语句子). 那么我们将会使用一种叫做beam search(束搜索)的算法. 
+
+为什么没有用贪心算法Greedy search? 贪心算法就是第一个选择可能性最大的选择, 然后根据这个选出可能性最大的第二个, 以此类推. 但是, 局部最优不代表全局最优. 但是我们又不能列举出全部的可能性, 毕竟``vocab_size``非常大. 所以我们用一种近似算法: Beam Search
+
+## 定向搜索
 
 
 
 
-​                            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
