@@ -316,17 +316,33 @@ LSTM全称为Long-Short-Term-Memory.
 1. y*的概率更大, 那么说明明明是``y*``应该被选中, 但是beam search没有选中它, 说明束搜索算法有问题 
 2. y*的概率更小, 那么说明束搜索算法没问题, 但是RNN模型错误
 
+## Bleu得分
 
+在翻译任务中, 翻译过来的句子貌似是没有ground truth的, 毕竟很难说那个翻译是最好的. 
 
+BLEU, 全称是``bilingual evaluation understudy ``(双语评估替补)
 
+![image](img/45.png)
 
+在这个例子里面, MT, machine translation, 明显是一个非常糟糕的翻译, 那么如何衡量精确度呢? 如果说仅仅是判断每个单词是否在提供的参考翻译里面, 那么结果令人十分诧异, 竟然是7/7, 明显反直觉; 因此, 引入了得分上限, the这个单词最多在1中出现两次, 所以说the单词得分上限为2, 所以说精确度是2/7
 
+但是这些是单独的单词, 有的时候我们希望考虑``pairs of words``. 
 
+![image](img/46.png)
 
+两个单词两个单词一看, 一共有6组; 然后看每个**种类**在引用中出现的**最高次数**(比如说on the在两个引用里面都有, 所以说最高次数是1, 因此on the得分是1)
 
+![image](img/47.png)
 
+上面两个情况, 分别是Pn 中n为1, 2的例子. 最后就可以引出Bleu得分了:
 
+![image](img/48.png)
 
+求出P1,2,3,4, 然后算平均数然后作为指数, 最后前面会加上Bp惩罚因子(brevity penalty)来乘法生成句子很短的情况. Bp取值如上图. 
+
+注意! BP otherwise的情况的公式给错了, 应该是:
+
+``exp(1-reference_output_length/MT_output_length)``
 
 
 
