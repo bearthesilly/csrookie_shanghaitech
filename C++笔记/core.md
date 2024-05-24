@@ -126,11 +126,46 @@ void print(const int (&arr)[100]) {
 50. 只声明一个类, 但是啥也不知道, 那么就是incomplete type, 只能给它声明指针或引用
 51.  析构函数结束后, 类内所有成员都会被自动摧毁, 摧毁顺序是声明顺序的逆序!
 52. 默认析构函数**不会**自动释放指针指向的内存
-53. 
+53. ``std::shared_ptr // in <memory>``允许智慧指针的复制, 但是有特殊的设计; ``std::unique_ptr // in <memory>`` 不允许智慧指针的复制(***move-only type***, move之后的指针变成空指针); 且注意, 这两个和是``class template``, 不是`type`
 
+54. ``std::unique_ptr<Student> p(new Student("Bob", 2020123123));``也可以: 
 
+``std::unique_ptr p1 = std::make_unique("Bob", 2020123123);``
 
+``auto p2 = std::make_unique("Alice", 2020321321);``
 
+55. The default constructor of ``std::unique_ptr<T>`` initializes ptr to be a ``null pointer``. It is not holding some indeterminate value. 
+
+56. ````c++
+    // Given that `pWindow` is a `std::unique_ptr<Window>`.
+    auto p = pWindow; // Oops, attempting to copy a `std::unique_ptr`.
+    ````
+
+    If you want p to be just an observer, write ``auto p = pWindow.get();`` ``pWindow.get()`` returns a raw pointer to the object, which is of type ``Window * ``. 
+
+    Be careful! As an observer, p should never interfere in the lifetime of the object. A simple delete p; will cause disaster.
+
+57. 如果``std::unique_ptr up(new T[n]);``呢? 应该用``delete[]``的但是却是``delete``
+
+A template ``specialization: std::unique_ptr ``. 或者说直接使用STL
+
+58. Zero-overhead: Using a ``std::unique_ptr`` does ***not*** cost more time or space than using raw pointers.
+
+59. ````c++
+    std::shared_ptr<Type> sp2(new Type(args));
+    auto sp = std::make_shared<Type>(args); // equivalent, but better
+    ````
+
+    ``sp.use_count()`` : The value of the reference counter.
+
+````c++
+auto sp = std::make_shared<std::string>(10, 'c');
+{
+auto sp2 = sp;
+std::cout << sp.use_count() << std::endl; // 2
+} // `sp2` is destroyed, but the managed object is not destroyed.
+std::cout << sp.use_count() << std::endl; // 1
+````
 
 
 
