@@ -166,18 +166,3 @@ std::cout << sp.use_count() << std::endl; // 2
 } // `sp2` is destroyed, but the managed object is not destroyed.
 std::cout << sp.use_count() << std::endl; // 1
 ````
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
