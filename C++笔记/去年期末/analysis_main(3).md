@@ -117,7 +117,7 @@ AB
 
 D: std::string  std::vector不需要手动释放, 因为STL会自动释放
 
-C: The copy constructor, the move constructor and the destructor of Book are implicitly declared, and implicitly defined if they are used. The copy assignment operator and the move assignment operator are implicitly declared and implicitly deleted since title and isbn are const. The word ”has” in choice C is not clear.
+C: The copy constructor, the move constructor and the destructor of Book are implicitly declared, and implicitly defined if they are used. The copy assignment operator and the move assignment operator are implicitly declared and implicitly deleted since title and isbn are const. The word ”has” in choice C is not clear.
 
 在 C++ 中，如果没有显式地声明或定义某些特殊成员函数（如拷贝构造函数、移动构造函数和析构函数），编译器会自动生成这些函数。这些函数负责对象的复制、移动和销毁。因此，即使没有明确定义，编译器也会为 `Book` 类隐式声明和定义这些函数，以便在需要时执行相应的操作。因此，即使没有明确提及这些函数，它们仍然存在并起作用。
 
