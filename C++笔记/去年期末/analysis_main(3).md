@@ -195,6 +195,93 @@ D. 友元不属于类里面的成员
 
 B   注意返回的应该是对象实例, 而不是this指针, 所以说返回的*this就是在对this指针解引用, 返回对象本身以实现链式编程
 
+# 第二道大题:
+
+````c++
+auto checkPeak(const std::vector<int> &v) {
+  std::size_t i = 0;
+  while (i + 1 < v.size() && v[i] <= v[i + 1])
+    ++i;
+  auto j = v.size() - 1;
+  while (j > 0 && v[j] <= v[j - 1])
+    --j;
+  return i > 0 && i + 1 < v.size() && i == j;
+}
+auto negate(std::vector<int> v) {
+  for (auto &x : v)
+    x = -x;
+  return v;
+}
+bool isSinglePeaked(const std::vector<int> &v) {
+  return checkPeak(v) || checkPeak(negate(v));
+}
+````
+
+有点算法的味道; 第一个函数是判断是不是"山峰"类型, 两个iterator从左边和右边分别出发
+
+第二个函数是反转, 因为可能符合要求的是"谷底", 谷底反过来就是山峰
+
+最后判断是不是山峰或谷底
+
+# 第三道大题:
+
+(1) ``virtual ~Clock() = defualt``
+
+(2)  (1)处:
+
+ ````c++
+ friend std::ostream &operator<<(std::ostream &, const Time&);
+ Time &operator++(){
+     ++m_minute;
+     if (m_minute == 60) {
+         m_hour = (m_hour + 1) % 24;
+ 		m_minute = 0;
+     }
+     return *this;
+ }
+ ````
+
+​       (3)处: 
+
+````c++
+std::ostream &operator<<(std::ostream &, const Time &t){
+    return os << Time::fill2(t.m_hour) << ":" << Time::fill2(t.m_minute);
+}
+````
+
+(3) 
+
+````c++
+// (1) 加上判断两个Time是否相等的运算符重载
+bool &operator==(const Time &rhs) const{
+    return m_hour == rhs.m_hour && m_minute == rhs.m_minute;
+}
+// (2) display
+virtual void display() const override{
+    Clock::display(); // 基类的方法是继承的
+	std::cout << "Alarm: " << m_alarm << std::endl;
+	if (m_alarm == m_time)
+		std::cout << "ALARM!" << std::endl;
+}
+````
+
+# 第四道大题
+
+````c++
+Dynarray sorted() const & {
+	auto ret = *this;
+	std::sort(ret.m_storage, ret.m_storage + ret.m_length);
+	return ret;
+}
+Dynarray &&sorted() && {
+	std::sort(m_storage, m_storage + m_length);
+	return std::move(*this);
+}
+
+````
+
+
+
 
 
 
