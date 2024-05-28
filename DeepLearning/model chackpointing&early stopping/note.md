@@ -182,7 +182,7 @@ torch.save(model.state_dict(), 'model.ckpt')
 
 由于这里训练五轮, 所以说每一轮之后都会保存一次; 效果见下图:
 
-![image](img\1.png)
+![image](img/1.png)
 
 在上面情境中, 训练一轮之后直接ctrl+c, 中断了; 但是第一轮结束后的checkpoint都保留了下来
 
