@@ -1,7 +1,7 @@
 # csrookie
 This github repository aims to record my studying path in cs. My personal website is here: [csrookie](https://bearthesilly.github.io)
 
-I have just finished the internship in [4DVLab](https://4dvlab.github.io/index.html) on the work of AAAI 2025 (Aug 20th), proudly under the instruction and guidance of [Prof.Yuexin Ma](https://yuexinma.me/aboutme.html) and senior [Yiteng Xu](https://yiteng-xu.github.io/). And I am currently looking for the next internship. 
+I finished the internship in [4DVLab](https://4dvlab.github.io/index.html) in September, 2024, proudly under the instruction and guidance of [Prof.Yuexin Ma](https://yuexinma.me/aboutme.html) and senior [Yiteng Xu](https://yiteng-xu.github.io/). Currently, with great honor, I am working with [Prof.Kewei Tu](https://faculty.sist.shanghaitech.edu.cn/faculty/tukw/) and [Prof.Kan Ren](https://sist.shanghaitech.edu.cn/rk/list.htm).  
 
 My research interest is currently about Computer Vision (Point Cloud), Computer Graphics (Neural Radiance Field), and Natural Language Processing. I am still struggling to discover my real interest to focus on. I am also a little bit interested into the interpretability in Deep Learning. 
 
