@@ -35,6 +35,7 @@ public:
         p->next_ = node;        
     }
 
+
     void InsertHead(int val){ // 链表头插法; 注意修改的顺序!!
         Node *node = new Node(val);
         node->next_ = head_->next_;
@@ -101,6 +102,8 @@ private:
     friend bool MergeLink(Clink& link1, Clink& link2);
     friend bool GetLastKNode(Clink &link, int k, int &val);
 };
+
+
 
 void ReverseLink(Clink &link){
     Node *p = link.head_->next_;
